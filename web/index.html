@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NOMAD - Near-infrared Optode Montage Automated Designer</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&family=Source+Sans+3:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Three.js for 3D visualization -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+</head>
+<body>
+    <header class="main-header">
+        <div class="header-content">
+            <div class="logo-section">
+                <div class="logo-icon">🏜️</div>
+                <div class="logo-text">
+                    <h1>NOMAD</h1>
+                    <span class="subtitle">Near-infrared Optode Montage Automated Designer</span>
+                </div>
+            </div>
+            <div class="credits">
+                <div class="credit-line">Created by Kyle Mathewson</div>
+                <div class="credit-line">Cognitive Neuroimaging Lab</div>
+                <div class="credit-line">University of Alberta</div>
+            </div>
+        </div>
+    </header>
+
+    <nav class="main-nav">
+        <button class="nav-btn active" data-panel="settings">
+            <span class="nav-number">1</span>
+            <span class="nav-label">Settings</span>
+        </button>
+        <button class="nav-btn" data-panel="schematic">
+            <span class="nav-number">2</span>
+            <span class="nav-label">Schematic</span>
+        </button>
+        <button class="nav-btn" data-panel="assign">
+            <span class="nav-number">3</span>
+            <span class="nav-label">Assign MUX</span>
+        </button>
+        <button class="nav-btn" data-panel="output">
+            <span class="nav-number">4</span>
+            <span class="nav-label">Output</span>
+        </button>
+    </nav>
+
+    <main class="app-content">
+        <!-- SETTINGS PANEL -->
+        <section id="settings-panel" class="panel active">
+            <div class="panel-grid">
+                <div class="panel-left">
+                    <div class="panel-card file-import">
+                        <h3>📁 Import or Design</h3>
+                        
+                        <div class="design-mode-toggle">
+                            <button class="mode-btn active" data-mode="import">
+                                📂 Import File
+                            </button>
+                            <button class="mode-btn" data-mode="roi">
+                                🧠 Design by ROI
+                            </button>
+                        </div>
+
+                        <!-- Import Mode -->
+                        <div id="import-mode" class="mode-content active">
+                            <div class="import-section">
+                                <label class="file-label">
+                                    <span>Load SNIRF/HDF5 File</span>
+                                    <input type="file" id="snirf-file" accept=".snirf,.hdf5,.h5,.json">
+                                </label>
+                                <div class="file-info" id="file-info">
+                                    <span class="placeholder">No file loaded</span>
+                                </div>
+                            </div>
+                            <div class="divider-text">or</div>
+                            <div class="import-section">
+                                <label class="file-label">
+                                    <span>Load .elp Electrode File</span>
+                                    <input type="file" id="elp-file" accept=".elp,.txt,.csv">
+                                </label>
+                            </div>
+                            <div class="divider-text">or</div>
+                            <button class="btn-secondary" id="load-example">
+                                Load Example Montage
+                            </button>
+                            <button class="btn-secondary mne-example-btn" id="load-mne-example">
+                                🧠 Load MNE-NIRS Motor Example
+                            </button>
+                        </div>
+
+                        <!-- ROI Design Mode -->
+                        <div id="roi-mode" class="mode-content">
+                            <p class="mode-description">
+                                Click on the head map to select brain regions. 
+                                Optodes will be auto-placed using <strong>real MNE anatomical coordinates</strong>.
+                            </p>
+                            <div class="roi-head-map">
+                                <canvas id="roi-canvas" width="350" height="350"></canvas>
+                            </div>
+                            <div class="roi-controls">
+                                <div class="roi-selected" id="roi-selected">
+                                    <span class="placeholder">Click regions to select</span>
+                                </div>
+                                
+                                <div class="checkbox-row">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="show-electrodes" checked>
+                                        <span>Show 10-20 electrode positions</span>
+                                    </label>
+                                </div>
+                                
+                                <div class="roi-params">
+                                    <div class="param-row">
+                                        <label>Optode Density</label>
+                                        <select id="roi-density">
+                                            <option value="low">Low (~20 optodes)</option>
+                                            <option value="medium" selected>Medium (~40 optodes)</option>
+                                            <option value="high">High (~60 optodes)</option>
+                                            <option value="hd">HD-DOT (~100 optodes)</option>
+                                        </select>
+                                    </div>
+                                    <div class="param-row">
+                                        <label>Coverage Priority</label>
+                                        <select id="roi-priority">
+                                            <option value="coverage" selected>Maximize Coverage</option>
+                                            <option value="depth">Optimize Depth</option>
+                                            <option value="resolution">Spatial Resolution</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <button class="btn-primary" id="btn-generate-roi">
+                                    🎯 Generate Optimal Layout
+                                </button>
+                                <button class="btn-secondary btn-small" id="btn-clear-roi">
+                                    Clear Selection
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="panel-card montage-preview">
+                        <h3>🧠 Montage Preview</h3>
+                        <div class="view-toggle">
+                            <button class="view-toggle-btn active" data-view="topo">Top View</button>
+                            <button class="view-toggle-btn" data-view="3d">3D View</button>
+                        </div>
+                        <div id="preview-canvas-container" class="head-view-container">
+                            <canvas id="preview-canvas" width="400" height="400"></canvas>
+                            <div id="preview-3d-container" class="three-container hidden"></div>
+                        </div>
+                        <div class="preview-stats" id="preview-stats">
+                            <span>Sources: <strong id="stat-sources">0</strong></span>
+                            <span>Detectors: <strong id="stat-detectors">0</strong></span>
+                            <span>Channels: <strong id="stat-channels">0</strong></span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel-right">
+                    <div class="panel-card settings-form">
+                        <h3>⚙️ Configuration</h3>
+                        
+                        <div class="form-section">
+                            <h4>Distance Parameters</h4>
+                            <div class="form-row">
+                                <label>Max Distance (mm)</label>
+                                <input type="number" id="max-distance" value="60" min="20" max="100">
+                                <span class="hint">Upper limit for crosstalk range</span>
+                            </div>
+                            <div class="form-row">
+                                <label>Min Distance (mm)</label>
+                                <input type="number" id="min-distance" value="15" min="5" max="30">
+                                <span class="hint">Minimum source-detector separation</span>
+                            </div>
+                        </div>
+
+                        <div class="form-section">
+                            <h4>Channel Configuration</h4>
+                            <div class="form-row">
+                                <label>Number of Sources</label>
+                                <input type="number" id="n-sources" value="32" min="4" max="256">
+                            </div>
+                            <div class="form-row">
+                                <label>Number of Detectors</label>
+                                <input type="number" id="n-detectors" value="15" min="2" max="128">
+                            </div>
+                            <div class="form-row">
+                                <label>Time Slots (MUX Banks)</label>
+                                <input type="number" id="n-timeslots" value="8" min="2" max="32">
+                            </div>
+                            <div class="form-row">
+                                <label>Sources per Slot (Capacity)</label>
+                                <input type="number" id="capacity" value="4" min="1" max="16">
+                            </div>
+                        </div>
+
+                        <div class="form-section">
+                            <h4>Algorithm Settings</h4>
+                            <div class="form-row">
+                                <label>Algorithm</label>
+                                <select id="algorithm">
+                                    <option value="monte-carlo" selected>Random Restart Monte Carlo</option>
+                                    <option value="dsatur">DSATUR</option>
+                                    <option value="greedy">Greedy Random</option>
+                                </select>
+                            </div>
+                            <div class="form-row">
+                                <label>Monte Carlo Trials</label>
+                                <input type="number" id="n-trials" value="1000" min="10" max="100000">
+                            </div>
+                        </div>
+                    </div>
+
+                    <button class="btn-primary btn-large" id="btn-proceed">
+                        <span>2. Design Montage →</span>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- SCHEMATIC PANEL -->
+        <section id="schematic-panel" class="panel">
+            <div class="schematic-layout">
+                <div class="schematic-toolbar">
+                    <button class="tool-btn active" data-tool="select" title="Select">
+                        <span>👆</span> Select
+                    </button>
+                    <button class="tool-btn" data-tool="add-source" title="Add Source">
+                        <span>🔵</span> Add Source
+                    </button>
+                    <button class="tool-btn" data-tool="add-detector" title="Add Detector">
+                        <span>🔺</span> Add Detector
+                    </button>
+                    <button class="tool-btn" data-tool="remove" title="Remove">
+                        <span>❌</span> Remove
+                    </button>
+                    <div class="toolbar-spacer"></div>
+                    <button class="tool-btn" id="btn-clear-all">
+                        <span>🗑️</span> Clear All
+                    </button>
+                    <button class="tool-btn" id="btn-generate-grid">
+                        <span>📐</span> Generate Grid
+                    </button>
+                </div>
+
+                <div class="schematic-main">
+                    <div class="schematic-canvas-wrap">
+                        <div class="schematic-view-toggle">
+                            <button class="view-toggle-btn active" data-view="topo">Topographic View</button>
+                            <button class="view-toggle-btn" data-view="3d">3D Brain View</button>
+                        </div>
+                        <div class="view-presets hidden" id="schematic-view-presets">
+                            <button class="preset-btn" data-view-preset="top" title="Top view (overhead)">↓ Top</button>
+                            <button class="preset-btn" data-view-preset="front" title="Front view (face)">○ Front</button>
+                            <button class="preset-btn" data-view-preset="left" title="Left side">← Left</button>
+                            <button class="preset-btn" data-view-preset="right" title="Right side">→ Right</button>
+                            <button class="preset-btn" data-view-preset="back" title="Back of head">○ Back</button>
+                        </div>
+                        <div class="topo-canvas-container">
+                            <canvas id="schematic-canvas" width="600" height="600"></canvas>
+                        </div>
+                        <div id="schematic-3d-container" class="three-container hidden"></div>
+                        <div class="schematic-legend">
+                            <div class="legend-item">
+                                <span class="legend-source"></span> Source
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-detector"></span> Detector
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-channel"></span> Channel
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="schematic-sidebar">
+                        <div class="info-card">
+                            <h4>🎯 Current Selection</h4>
+                            <div id="selection-info">
+                                <span class="placeholder">Click on head to select optode</span>
+                            </div>
+                        </div>
+                        <div class="info-card">
+                            <h4>📊 Statistics</h4>
+                            <div class="stat-grid">
+                                <div class="stat">
+                                    <span class="stat-label">Sources</span>
+                                    <span class="stat-value" id="stat-remaining">0</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-label">Detectors</span>
+                                    <span class="stat-value" id="stat-placed">0</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-label">Channels</span>
+                                    <span class="stat-value" id="stat-valid-ch">0</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="info-card">
+                            <h4>🔗 Conflict Graph</h4>
+                            <div class="conflict-stats">
+                                <span>Edges: <strong id="conflict-edges">0</strong></span>
+                                <span>Avg Degree: <strong id="conflict-degree">0</strong></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <div class="panel-actions">
+                <button class="btn-secondary" id="btn-back-settings">
+                    ← Back
+                </button>
+                <button class="btn-primary" id="btn-to-assign">
+                    3. Assign Multiplexing →
+                </button>
+            </div>
+        </section>
+
+        <!-- ASSIGN MUX PANEL -->
+        <section id="assign-panel" class="panel">
+            <div class="assign-layout">
+                <div class="assign-main">
+                    <div class="assign-view-toggle">
+                        <button class="view-toggle-btn active" data-view="topo">Topographic View</button>
+                        <button class="view-toggle-btn" data-view="3d">3D Brain View</button>
+                    </div>
+                    <div class="view-presets hidden" id="assign-view-presets">
+                        <button class="preset-btn" data-view-preset="top" title="Top view (overhead)">↓ Top</button>
+                        <button class="preset-btn" data-view-preset="front" title="Front view (face)">○ Front</button>
+                        <button class="preset-btn" data-view-preset="left" title="Left side">← Left</button>
+                        <button class="preset-btn" data-view-preset="right" title="Right side">→ Right</button>
+                        <button class="preset-btn" data-view-preset="back" title="Back of head">○ Back</button>
+                    </div>
+                    <div class="assign-canvas-wrap">
+                        <canvas id="assign-canvas" width="700" height="700"></canvas>
+                        <div id="assign-3d-container" class="three-container hidden"></div>
+                    </div>
+                    <div class="timeslot-legend" id="timeslot-legend">
+                        <!-- Generated dynamically -->
+                    </div>
+                </div>
+
+                <div class="assign-sidebar">
+                    <div class="panel-card">
+                        <h3>🎨 Automated Multiplex (MUX) Assignment</h3>
+                        
+                        <div class="assign-buttons">
+                            <button class="btn-action" id="btn-plot-channels">
+                                1. Plot Channels
+                            </button>
+                            <button class="btn-action" id="btn-channel-stats">
+                                2. Channel Stats
+                            </button>
+                        </div>
+
+                        <div class="form-section">
+                            <h4>3. Select Montage</h4>
+                            <div class="form-row">
+                                <label>Montage Number</label>
+                                <select id="montage-select">
+                                    <option value="1">Montage 1</option>
+                                </select>
+                                <button class="btn-small" id="btn-show-montage">Show</button>
+                            </div>
+                        </div>
+
+                        <button class="btn-primary btn-large btn-color" id="btn-color">
+                            <span>4. Colour!</span>
+                            <small>Press to assign mux numbers</small>
+                        </button>
+
+                        <div class="form-section">
+                            <h4>Coloring Settings</h4>
+                            <div class="form-row">
+                                <label>Style</label>
+                                <select id="coloring-style">
+                                    <option value="doil">DOIL</option>
+                                    <option value="bank">Bank</option>
+                                    <option value="custom">Custom</option>
+                                </select>
+                            </div>
+                            <div class="form-row">
+                                <label>Monte Carlo Tries</label>
+                                <input type="number" id="mc-tries" value="1000" min="10" max="100000">
+                            </div>
+                        </div>
+
+                        <button class="btn-secondary btn-check" id="btn-crosstalk-check">
+                            5. Crosstalk Check
+                            <small>Validate coloring</small>
+                        </button>
+
+                        <div class="result-box" id="result-box">
+                            <div class="result-header">
+                                <span class="result-icon">⏳</span>
+                                <span class="result-text">Ready to color</span>
+                            </div>
+                            <div class="result-details" id="result-details">
+                                <!-- Filled by JS -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel-actions">
+                <button class="btn-secondary" id="btn-back-schematic">
+                    ← Back to Schematic
+                </button>
+                <button class="btn-primary" id="btn-to-output">
+                    6. Done - Output Files →
+                </button>
+            </div>
+        </section>
+
+        <!-- OUTPUT PANEL -->
+        <section id="output-panel" class="panel">
+            <div class="output-layout">
+                <div class="output-preview">
+                    <canvas id="output-canvas" width="700" height="500"></canvas>
+                </div>
+
+                <div class="output-sidebar">
+                    <div class="panel-card">
+                        <h3>📤 Output and Save Menu</h3>
+
+                        <div class="form-section">
+                            <h4>Light Properties</h4>
+                            <div class="form-row">
+                                <label>Wavelength (nm)</label>
+                                <select id="wavelength">
+                                    <option value="830" selected>830</option>
+                                    <option value="760">760</option>
+                                    <option value="850">850</option>
+                                </select>
+                            </div>
+                            <div class="form-row">
+                                <label>Modulation Freq. (MHz)</label>
+                                <select id="mod-freq">
+                                    <option value="110" selected>110</option>
+                                    <option value="100">100</option>
+                                    <option value="140">140</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="output-buttons">
+                            <button class="btn-action" id="btn-save-schematic">
+                                1. Save Schematic(s) (.png)
+                            </button>
+                            <button class="btn-action" id="btn-create-mtg">
+                                2. Create (.mtg) File
+                            </button>
+                            <button class="btn-action" id="btn-create-snirf">
+                                3. Create SNIRF/MNE File
+                            </button>
+                            <button class="btn-action btn-neurodot" id="btn-create-neurodot">
+                                4. Export for NeuroDOT
+                            </button>
+                            <button class="btn-action" id="btn-create-gdf">
+                                5. Create Graph Definitions
+                            </button>
+                        </div>
+
+                        <button class="btn-primary btn-large" id="btn-save-workspace">
+                            💾 Save Workspace Data (.json)
+                        </button>
+
+                        <div class="export-log" id="export-log">
+                            <h4>Export Log</h4>
+                            <div class="log-content" id="log-content">
+                                <span class="placeholder">No exports yet</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel-actions">
+                <button class="btn-secondary" id="btn-back-assign">
+                    ← Back to Assignment
+                </button>
+                <button class="btn-primary" id="btn-new-session">
+                    🆕 Start New Session
+                </button>
+            </div>
+        </section>
+    </main>
+
+    <footer class="main-footer">
+        <div class="footer-content">
+            <div class="footer-left">
+                <span>NOMAD v2.0 Web Edition</span>
+                <span class="separator">|</span>
+                <a href="https://github.com/kylemath/GraphColouring" target="_blank">GitHub</a>
+                <span class="separator">|</span>
+                <a href="https://mne.tools/mne-nirs/" target="_blank">MNE-NIRS</a>
+            </div>
+            <div class="footer-right">
+                <span>Based on the original NOMAD toolbox (2012)</span>
+                <span class="separator">|</span>
+                <span>Graph Coloring for Crosstalk Elimination</span>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Modal for algorithm progress -->
+    <div class="modal" id="progress-modal">
+        <div class="modal-content">
+            <h3>🔄 Running Algorithm</h3>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progress-fill"></div>
+            </div>
+            <div class="progress-text" id="progress-text">Initializing...</div>
+            <button class="btn-secondary" id="btn-cancel-algo">Cancel</button>
+        </div>
+    </div>
+
+    <!-- Modal for results -->
+    <div class="modal" id="results-modal">
+        <div class="modal-content modal-large">
+            <h3>📊 Channel Statistics</h3>
+            <div class="modal-body" id="stats-body">
+                <!-- Filled by JS -->
+            </div>
+            <button class="btn-primary" id="btn-close-stats">Close</button>
+        </div>
+    </div>
+
+    <script src="nomad.js"></script>
+</body>
+</html>
+

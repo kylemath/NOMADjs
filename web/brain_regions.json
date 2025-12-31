@@ -1,0 +1,149 @@
+{
+  "source": "NOMAD brain regions (simplified from Brodmann/HCP-MMP)",
+  "reference": "https://mne.tools/mne-nirs/stable/auto_examples/general/plot_70_visualise_brain.html",
+  "coordinate_system": "MNI (mm)",
+  "regions": {
+    "prefrontal": {
+      "name": "Prefrontal Cortex",
+      "brodmann": [
+        9,
+        10,
+        46
+      ],
+      "color": "#e74c3c",
+      "center": {
+        "x": 0,
+        "y": 80,
+        "z": 30
+      },
+      "description": "Executive function, working memory"
+    },
+    "motor": {
+      "name": "Primary Motor Cortex (M1)",
+      "brodmann": [
+        4
+      ],
+      "color": "#2ecc71",
+      "center": {
+        "x": 0,
+        "y": 0,
+        "z": 75
+      },
+      "description": "Voluntary movement"
+    },
+    "premotor": {
+      "name": "Premotor Cortex",
+      "brodmann": [
+        6
+      ],
+      "color": "#27ae60",
+      "center": {
+        "x": 0,
+        "y": 30,
+        "z": 65
+      },
+      "description": "Motor planning"
+    },
+    "somatosensory": {
+      "name": "Primary Somatosensory Cortex (S1)",
+      "brodmann": [
+        1,
+        2,
+        3
+      ],
+      "color": "#1abc9c",
+      "center": {
+        "x": 0,
+        "y": -20,
+        "z": 70
+      },
+      "description": "Touch and proprioception"
+    },
+    "auditory": {
+      "name": "Primary Auditory Cortex (A1)",
+      "brodmann": [
+        41,
+        42
+      ],
+      "color": "#9b59b6",
+      "center": {
+        "x": 60,
+        "y": -20,
+        "z": 10
+      },
+      "description": "Sound processing"
+    },
+    "visual": {
+      "name": "Primary Visual Cortex (V1)",
+      "brodmann": [
+        17
+      ],
+      "color": "#3498db",
+      "center": {
+        "x": 0,
+        "y": -90,
+        "z": 10
+      },
+      "description": "Visual processing"
+    },
+    "temporal": {
+      "name": "Temporal Cortex",
+      "brodmann": [
+        20,
+        21,
+        22
+      ],
+      "color": "#fd79a8",
+      "center": {
+        "x": 55,
+        "y": -10,
+        "z": -20
+      },
+      "description": "Language, memory, face recognition"
+    },
+    "parietal": {
+      "name": "Posterior Parietal Cortex",
+      "brodmann": [
+        5,
+        7,
+        39,
+        40
+      ],
+      "color": "#f39c12",
+      "center": {
+        "x": 0,
+        "y": -50,
+        "z": 50
+      },
+      "description": "Spatial attention, sensorimotor integration"
+    },
+    "ifg": {
+      "name": "Inferior Frontal Gyrus (Broca)",
+      "brodmann": [
+        44,
+        45
+      ],
+      "color": "#e67e22",
+      "center": {
+        "x": -50,
+        "y": 25,
+        "z": 15
+      },
+      "description": "Speech production (left), social cognition"
+    },
+    "dlpfc": {
+      "name": "Dorsolateral Prefrontal Cortex",
+      "brodmann": [
+        9,
+        46
+      ],
+      "color": "#c0392b",
+      "center": {
+        "x": 40,
+        "y": 45,
+        "z": 30
+      },
+      "description": "Working memory, cognitive control"
+    }
+  }
+}
