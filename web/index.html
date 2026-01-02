@@ -96,22 +96,15 @@
                         <!-- ROI Design Mode -->
                         <div id="roi-mode" class="mode-content">
                             <p class="mode-description">
-                                Click on the head map to select brain regions. 
+                                Click on the 3D brain to select regions. 
                                 Optodes will be auto-placed using <strong>real MNE anatomical coordinates</strong>.
                             </p>
                             <div class="roi-head-map">
-                                <canvas id="roi-canvas" width="350" height="350"></canvas>
+                                <div id="roi-3d-container" class="three-container" style="width: 100%; height: 400px; position: relative;"></div>
                             </div>
                             <div class="roi-controls">
                                 <div class="roi-selected" id="roi-selected">
-                                    <span class="placeholder">Click regions to select</span>
-                                </div>
-                                
-                                <div class="checkbox-row">
-                                    <label class="checkbox-label">
-                                        <input type="checkbox" id="show-electrodes" checked>
-                                        <span>Show 10-20 electrode positions</span>
-                                    </label>
+                                    <span class="placeholder">Click regions on 3D brain to select</span>
                                 </div>
                                 
                                 <div class="roi-params">
@@ -212,6 +205,174 @@
                             <div class="form-row">
                                 <label>Monte Carlo Trials</label>
                                 <input type="number" id="n-trials" value="1000" min="10" max="100000">
+                            </div>
+                        </div>
+
+                        <div class="form-section">
+                            <h4>Standardized Grid System</h4>
+                            <div class="form-row">
+                                <label>
+                                    <input type="checkbox" id="use-grid-system" checked>
+                                    Use Grid Positions
+                                </label>
+                                <span class="hint">Constrain to standardized EEG locations</span>
+                            </div>
+                            <div class="form-row">
+                                <label>
+                                    <input type="checkbox" id="show-geodesic-grid" checked>
+                                    Show Complete Grid Mesh
+                                </label>
+                                <span class="hint">Display full latitude/longitude grid</span>
+                            </div>
+                            <div class="form-row">
+                                <label>
+                                    <input type="checkbox" id="show-grid-points" checked>
+                                    Highlight Standard Positions
+                                </label>
+                                <span class="hint">Show 10-20/10-10/10-5 positions</span>
+                            </div>
+                            <div class="form-row">
+                                <label>Grid Spacing (surface mm)</label>
+                                <select id="geodesic-spacing">
+                                    <option value="30">30mm (Sparse ~200 positions)</option>
+                                    <option value="20">20mm (Medium ~450 positions)</option>
+                                    <option value="15" selected>15mm (Dense ~800 positions)</option>
+                                    <option value="10">10mm (Very Dense ~1800 positions)</option>
+                                    <option value="7.5">7.5mm (Ultra Dense ~3200 positions)</option>
+                                </select>
+                                <span class="hint">Surface distance spacing (like measuring tape on head)</span>
+                            </div>
+                            <div class="form-row">
+                                <label>Standard Position Display</label>
+                                <select id="grid-density">
+                                    <option value="all" selected>All (10-5 High Density)</option>
+                                    <option value="10-10">10-10 (Intermediate)</option>
+                                    <option value="10-20">10-20 (Standard Only)</option>
+                                    <option value="none">Hide Standard Positions</option>
+                                </select>
+                                <span class="hint">Control which standard positions to highlight</span>
+                            </div>
+                            <div class="grid-info" id="grid-info">
+                                <small>📍 <span id="grid-count">461</span> standard positions | <span id="geodesic-count">~400</span> grid mesh points</small>
+                            </div>
+                        </div>
+
+                        <div class="form-section">
+                            <h4>Photon Path Visualization</h4>
+                            <div class="form-row">
+                                <label>
+                                    <input type="checkbox" id="show-photon-paths" checked>
+                                    Show Photon Migration Paths
+                                </label>
+                                <span class="hint">Toggle banana-shaped light trajectories</span>
+                            </div>
+                            <div class="form-row">
+                                <label>Path Opacity</label>
+                                <input type="range" id="path-opacity" min="0" max="100" value="60" style="width: 150px">
+                                <span id="path-opacity-value">60</span>%
+                                <span class="hint">Adjust light path transparency</span>
+                            </div>
+                        </div>
+
+                        <div class="form-section">
+                            <h4>Voxel-Based Forward Model</h4>
+                            <div class="form-row">
+                                <label>Voxel Resolution (mm)</label>
+                                <select id="voxel-resolution">
+                                    <option value="10">10mm (Coarse ~1K voxels)</option>
+                                    <option value="5" selected>5mm (Medium ~10K voxels)</option>
+                                    <option value="3">3mm (Fine ~50K voxels)</option>
+                                    <option value="2">2mm (Very Fine ~170K voxels)</option>
+                                </select>
+                                <span class="hint">Trade-off: resolution vs computation time</span>
+                            </div>
+                            <div class="form-row">
+                                <label>
+                                    <input type="checkbox" id="show-voxels">
+                                    Show Brain Surface Activity
+                                </label>
+                                <span class="hint">Project sensitivity onto cortical surface (MNE-style)</span>
+                            </div>
+                            <div class="form-row">
+                                <label>Voxel Selection Criteria</label>
+                                <select id="voxel-selection-mode">
+                                    <option value="lenient">Lenient - Any light penetration</option>
+                                    <option value="moderate" selected>Moderate - Multiple channels or moderate sensitivity</option>
+                                    <option value="strict">Strict - Many channels with high sensitivity</option>
+                                    <option value="custom">Custom - Manual settings</option>
+                                </select>
+                                <span class="hint">Control which voxels are shown based on coverage</span>
+                            </div>
+                            <div class="form-row" id="voxel-custom-settings" style="display: none;">
+                                <label>Min Channels</label>
+                                <input type="number" id="voxel-min-channels" min="1" max="20" value="2" style="width: 80px">
+                                <span class="hint">Minimum channels contributing to voxel</span>
+                            </div>
+                            <div class="form-row" id="voxel-weighted-settings" style="display: none;">
+                                <label>Min Weighted Sum (%)</label>
+                                <input type="range" id="voxel-min-weight" min="0" max="100" value="5" style="width: 150px">
+                                <span id="voxel-min-weight-value">5</span>%
+                                <span class="hint">Minimum weighted photon proportion</span>
+                            </div>
+                            <div class="form-row">
+                                <label>Voxel Threshold (%)</label>
+                                <input type="range" id="voxel-threshold" min="1" max="100" value="20" style="width: 150px">
+                                <span id="voxel-threshold-value">20</span>%
+                                <span class="hint">Show top X% most sensitive voxels (legacy mode)</span>
+                            </div>
+                            <div class="form-row">
+                                <label>Voxel Brightness</label>
+                                <input type="range" id="voxel-brightness" min="10" max="200" value="100" style="width: 150px">
+                                <span id="voxel-brightness-value">100</span>%
+                                <span class="hint">Adjust voxel opacity/contrast</span>
+                            </div>
+                            <div class="button-row">
+                                <button id="btn-build-sensitivity" class="btn">Build Sensitivity Matrix</button>
+                                <button id="btn-export-matrix" class="btn">Export Matrix</button>
+                            </div>
+                            <div class="grid-info" id="voxel-info" style="margin-top: 10px;">
+                                <small>🧠 <span id="voxel-count">-</span> total voxels | <span id="voxel-shown-count">-</span> shown | <span id="voxel-avg-channels">-</span> avg channels</small>
+                                <small style="display: block; margin-top: 4px;">📊 <span id="matrix-size">-</span> matrix entries</small>
+                            </div>
+                        </div>
+
+                        <div class="form-section">
+                            <h4>Coregistration</h4>
+                            <div class="form-row">
+                                <label>
+                                    <input type="checkbox" id="use-coregistration">
+                                    Enable Coregistration
+                                </label>
+                                <span class="hint">Align optodes to anatomical model (when grid disabled)</span>
+                            </div>
+                            <div class="form-row">
+                                <label>
+                                    <input type="checkbox" id="use-fiducial-alignment" checked>
+                                    Fiducial Alignment
+                                </label>
+                                <span class="hint">Use nasion, inion, LPA, RPA markers</span>
+                            </div>
+                            <div class="form-row">
+                                <label>
+                                    <input type="checkbox" id="use-regression" checked>
+                                    Regression Correction
+                                </label>
+                                <span class="hint">Correct systematic measurement errors</span>
+                            </div>
+                            <div class="form-row">
+                                <label>
+                                    <input type="checkbox" id="use-surface-fitting" checked>
+                                    Surface Fitting
+                                </label>
+                                <span class="hint">Project to anatomical surface shape</span>
+                            </div>
+                            <div class="button-row">
+                                <button class="btn-primary btn-small" id="btn-run-coregistration">
+                                    🎯 Run Coregistration
+                                </button>
+                                <button class="btn-secondary btn-small" id="btn-show-coreg-metrics">
+                                    View Quality Metrics
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -532,6 +693,51 @@
                 <!-- Filled by JS -->
             </div>
             <button class="btn-primary" id="btn-close-stats">Close</button>
+        </div>
+    </div>
+
+    <!-- Modal for coregistration metrics -->
+    <div class="modal" id="coreg-modal">
+        <div class="modal-content">
+            <h3>🎯 Coregistration Quality Metrics</h3>
+            <div class="modal-body" id="coreg-body">
+                <div class="metric-card">
+                    <h4>Fiducial Alignment</h4>
+                    <div class="metric-value" id="metric-fiducial">
+                        <span class="value">--</span> mm RMS error
+                    </div>
+                    <p class="metric-desc">Accuracy of alignment to nasion, inion, LPA, RPA markers</p>
+                </div>
+                
+                <div class="metric-card">
+                    <h4>Surface Fitting</h4>
+                    <div class="metric-value" id="metric-surface">
+                        <span class="value">--</span> mm RMS error
+                    </div>
+                    <p class="metric-desc">Average distance from optodes to anatomical surface</p>
+                </div>
+                
+                <div class="metric-card">
+                    <h4>Maximum Error</h4>
+                    <div class="metric-value" id="metric-max">
+                        <span class="value">--</span> mm
+                    </div>
+                    <p class="metric-desc">Worst-case positioning error across all optodes</p>
+                </div>
+                
+                <div class="metric-card">
+                    <h4>Coverage Quality</h4>
+                    <div class="metric-value" id="metric-coverage">
+                        <span class="value">--</span>%
+                    </div>
+                    <p class="metric-desc">Percentage of optodes within 5mm of target position</p>
+                </div>
+                
+                <div class="metric-interpretation" id="metric-interpretation">
+                    <strong>Interpretation:</strong> <span id="interpretation-text">No coregistration performed yet.</span>
+                </div>
+            </div>
+            <button class="btn-primary" id="btn-close-coreg">Close</button>
         </div>
     </div>
 

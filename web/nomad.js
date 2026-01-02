@@ -198,16 +198,26 @@ let FNIRS_EXAMPLE = null;
 // MNE head coordinate scale factor (mm to normalized units)
 const MNE_SCALE = 100; // Typical head radius ~100mm
 
+// Brain surface mesh for cortical projection
+let BRAIN_SURFACE = {
+    vertices: [],  // Array of {x, y, z, sensitivity, region}
+    faces: [],     // Array of [i, j, k] triangle indices
+    mesh: null,    // THREE.Mesh object
+    regions: {},   // Map of region name to vertex indices
+    selectedRegions: new Set()  // Currently selected regions for ROI
+};
+
 // Initialize default brain regions (will be replaced with MNE data when loaded)
+// Simplified to 8 main regions corresponding to cranial bones (4 per side)
 BRAIN_REGIONS = {
-    'Left Prefrontal Cortex': { x: -29.44, y: 83.92, z: -6.99, radius: 45, color: '#e74c3c', label: 'PFC-L' },
-    'Right Prefrontal Cortex': { x: 29.87, y: 84.9, z: -7.08, radius: 45, color: '#e74c3c', label: 'PFC-R' },
-    'Medial Prefrontal Cortex': { x: 0.11, y: 88.25, z: -1.71, radius: 40, color: '#9b59b6', label: 'mPFC' },
-    'Left Dorsolateral Prefrontal': { x: -60.25, y: 47.79, z: 15.39, radius: 40, color: '#3498db', label: 'DLPFC-L' },
-    'Right Dorsolateral Prefrontal': { x: 62.44, y: 49.36, z: 14.41, radius: 40, color: '#3498db', label: 'DLPFC-R' },
-    'Left Primary Motor Cortex': { x: -65.36, y: -11.63, z: 64.36, radius: 40, color: '#2ecc71', label: 'M1-L' },
-    'Right Primary Motor Cortex': { x: 67.12, y: -10.9, z: 63.58, radius: 40, color: '#2ecc71', label: 'M1-R' },
-    'Supplementary Motor Area': { x: 0.4, y: -9.17, z: 100.24, radius: 35, color: '#27ae60', label: 'SMA' }
+    'Left Frontal': { x: -45.0, y: 60.0, z: 10.0, radius: 45, color: '#e74c3c', label: 'Frontal-L' },
+    'Right Frontal': { x: 45.0, y: 60.0, z: 10.0, radius: 45, color: '#e74c3c', label: 'Frontal-R' },
+    'Left Parietal': { x: -55.0, y: -40.0, z: 60.0, radius: 45, color: '#3498db', label: 'Parietal-L' },
+    'Right Parietal': { x: 55.0, y: -40.0, z: 60.0, radius: 45, color: '#3498db', label: 'Parietal-R' },
+    'Left Temporal': { x: -80.0, y: -10.0, z: 0.0, radius: 45, color: '#f39c12', label: 'Temporal-L' },
+    'Right Temporal': { x: 80.0, y: -10.0, z: 0.0, radius: 45, color: '#f39c12', label: 'Temporal-R' },
+    'Left Occipital': { x: -30.0, y: -105.0, z: 15.0, radius: 45, color: '#9b59b6', label: 'Occipital-L' },
+    'Right Occipital': { x: 30.0, y: -105.0, z: 15.0, radius: 45, color: '#9b59b6', label: 'Occipital-R' }
 };
 
 /**
@@ -346,7 +356,9 @@ function loadMNENIRSExample() {
     const detectors = [];
     
     let sourceId = 0;
+    const sourcePositions = [];
     for (const [key, pos] of Object.entries(FNIRS_EXAMPLE.sources)) {
+        sourcePositions.push(pos);
         sources.push({
             id: sourceId++,
             x: pos.x,
@@ -357,14 +369,16 @@ function loadMNENIRSExample() {
     }
     
     let detectorId = 0;
+    const detectorPositions = [];
     for (const [key, pos] of Object.entries(FNIRS_EXAMPLE.detectors)) {
         // Skip duplicates (same position with different names)
-        const isDuplicate = detectors.some(d => 
+        const isDuplicate = detectorPositions.some(d => 
             Math.abs(d.x - pos.x) < 0.1 && 
             Math.abs(d.y - pos.y) < 0.1 && 
             Math.abs(d.z - pos.z) < 0.1
         );
         if (!isDuplicate) {
+            detectorPositions.push(pos);
             detectors.push({
                 id: detectorId++,
                 x: pos.x,
@@ -373,6 +387,28 @@ function loadMNENIRSExample() {
                 label: pos.label || key
             });
         }
+    }
+    
+    // Apply proper coregistration if fiducials are available
+    const allOptodes = [...sources, ...detectors];
+    const measuredFids = FNIRS_EXAMPLE.fiducials || null;
+    const coregistered = coregisterOptodes(allOptodes, measuredFids, {
+        useRigidAlignment: !!measuredFids,
+        useRegression: true,
+        useSurfaceFitting: true
+    });
+    
+    // Update positions with coregistered values
+    for (let i = 0; i < sources.length; i++) {
+        sources[i].x = coregistered[i].x;
+        sources[i].y = coregistered[i].y;
+        sources[i].z = coregistered[i].z;
+    }
+    for (let i = 0; i < detectors.length; i++) {
+        const idx = sources.length + i;
+        detectors[i].x = coregistered[idx].x;
+        detectors[i].y = coregistered[idx].y;
+        detectors[i].z = coregistered[idx].z;
     }
     
     // Update app state
@@ -394,26 +430,20 @@ function loadMNENIRSExample() {
 
 /**
  * Fallback brain regions if MNE data is not available
+ * Simplified to 8 main regions corresponding to cranial bones (4 per side)
  */
 function initializeFallbackRegions() {
     BRAIN_REGIONS = {
-        'Left Prefrontal Cortex': { x: -29.44, y: 83.92, z: -6.99, radius: 45, color: '#e74c3c', label: 'PFC-L' },
-        'Right Prefrontal Cortex': { x: 29.87, y: 84.9, z: -7.08, radius: 45, color: '#e74c3c', label: 'PFC-R' },
-        'Medial Prefrontal Cortex': { x: 0.11, y: 88.25, z: -1.71, radius: 40, color: '#9b59b6', label: 'mPFC' },
-        'Left Dorsolateral Prefrontal': { x: -60.25, y: 47.79, z: 15.39, radius: 40, color: '#3498db', label: 'DLPFC-L' },
-        'Right Dorsolateral Prefrontal': { x: 62.44, y: 49.36, z: 14.41, radius: 40, color: '#3498db', label: 'DLPFC-R' },
-        'Left Primary Motor Cortex': { x: -65.36, y: -11.63, z: 64.36, radius: 40, color: '#2ecc71', label: 'M1-L' },
-        'Right Primary Motor Cortex': { x: 67.12, y: -10.9, z: 63.58, radius: 40, color: '#2ecc71', label: 'M1-R' },
-        'Supplementary Motor Area': { x: 0.4, y: -9.17, z: 100.24, radius: 35, color: '#27ae60', label: 'SMA' },
-        'Left Superior Temporal': { x: -84.16, y: -16.02, z: -9.35, radius: 40, color: '#fd79a8', label: 'STG-L' },
-        'Right Superior Temporal': { x: 85.08, y: -15.02, z: -9.49, radius: 40, color: '#fd79a8', label: 'STG-R' },
-        'Left Inferior Parietal': { x: -53.01, y: -78.79, z: 55.94, radius: 40, color: '#f39c12', label: 'IPL-L' },
-        'Right Inferior Parietal': { x: 55.67, y: -78.56, z: 56.56, radius: 40, color: '#f39c12', label: 'IPL-R' },
-        'Left Visual Cortex': { x: -29.41, y: -112.45, z: 8.84, radius: 40, color: '#6c5ce7', label: 'V1-L' },
-        'Right Visual Cortex': { x: 29.84, y: -112.16, z: 8.8, radius: 40, color: '#6c5ce7', label: 'V1-R' },
-        'Medial Visual Cortex': { x: 0.11, y: -114.89, z: 14.66, radius: 40, color: '#00cec9', label: 'V1-M' }
+        'Left Frontal': { x: -45.0, y: 60.0, z: 10.0, radius: 45, color: '#e74c3c', label: 'Frontal-L' },
+        'Right Frontal': { x: 45.0, y: 60.0, z: 10.0, radius: 45, color: '#e74c3c', label: 'Frontal-R' },
+        'Left Parietal': { x: -55.0, y: -40.0, z: 60.0, radius: 45, color: '#3498db', label: 'Parietal-L' },
+        'Right Parietal': { x: 55.0, y: -40.0, z: 60.0, radius: 45, color: '#3498db', label: 'Parietal-R' },
+        'Left Temporal': { x: -80.0, y: -10.0, z: 0.0, radius: 45, color: '#f39c12', label: 'Temporal-L' },
+        'Right Temporal': { x: 80.0, y: -10.0, z: 0.0, radius: 45, color: '#f39c12', label: 'Temporal-R' },
+        'Left Occipital': { x: -30.0, y: -105.0, z: 15.0, radius: 45, color: '#9b59b6', label: 'Occipital-L' },
+        'Right Occipital': { x: 30.0, y: -105.0, z: 15.0, radius: 45, color: '#9b59b6', label: 'Occipital-R' }
     };
-    console.log('Using fallback brain regions');
+    console.log('Using fallback brain regions (8 main cranial regions)');
 }
 
 // ROI Selection State
@@ -514,6 +544,199 @@ function toTopoCoords(x, y, z, canvasSize) {
 }
 
 /**
+ * Draw grid lines and points on topographic view
+ * Shows hierarchical 10-20/10-10/10-5 structure plus complete geodesic grid
+ */
+function drawGridPoints(ctx, cx, cy, canvasSize) {
+    ctx.save();
+    
+    const headRadius = canvasSize * 0.35;
+    const gridDensity = document.getElementById('grid-density')?.value || 'all';
+    const showGeodesic = document.getElementById('show-geodesic-grid')?.checked !== false;
+    
+    // First, draw geodesic grid mesh (complete latitude/longitude grid)
+    if (showGeodesic && GridSystem.geodesicGrid && GridSystem.geodesicGrid.length > 0) {
+        ctx.strokeStyle = '#4a5568';
+        ctx.lineWidth = 0.3;
+        ctx.globalAlpha = 0.08;
+        
+        // Draw latitude lines (constant phi)
+        const phiValues = [...new Set(GridSystem.geodesicGrid.map(p => p.phi))];
+        for (const phi of phiValues) {
+            const pointsAtPhi = GridSystem.geodesicGrid
+                .filter(p => Math.abs(p.phi - phi) < 0.001)
+                .sort((a, b) => a.theta - b.theta);
+            
+            if (pointsAtPhi.length > 1) {
+                ctx.beginPath();
+                for (let i = 0; i < pointsAtPhi.length; i++) {
+                    const p = pointsAtPhi[i];
+                    const pos = toTopoCoords(p.x, p.y, p.z, canvasSize);
+                    const dist = Math.sqrt(Math.pow(pos.x - cx, 2) + Math.pow(pos.y - cy, 2));
+                    
+                    if (dist <= headRadius * 1.05) {
+                        if (i === 0) {
+                            ctx.moveTo(pos.x, pos.y);
+                        } else {
+                            ctx.lineTo(pos.x, pos.y);
+                        }
+                    }
+                }
+                // Close the loop
+                if (pointsAtPhi.length > 2) {
+                    const first = pointsAtPhi[0];
+                    const firstPos = toTopoCoords(first.x, first.y, first.z, canvasSize);
+                    ctx.lineTo(firstPos.x, firstPos.y);
+                }
+                ctx.stroke();
+            }
+        }
+        
+        // Draw longitude lines (constant theta, approximately)
+        // Group by theta buckets
+        const thetaBuckets = {};
+        const thetaBucketSize = 0.1; // radians
+        for (const p of GridSystem.geodesicGrid) {
+            const bucket = Math.round(p.theta / thetaBucketSize);
+            if (!thetaBuckets[bucket]) thetaBuckets[bucket] = [];
+            thetaBuckets[bucket].push(p);
+        }
+        
+        for (const points of Object.values(thetaBuckets)) {
+            if (points.length > 1) {
+                points.sort((a, b) => a.phi - b.phi);
+                
+                ctx.beginPath();
+                for (let i = 0; i < points.length; i++) {
+                    const p = points[i];
+                    const pos = toTopoCoords(p.x, p.y, p.z, canvasSize);
+                    const dist = Math.sqrt(Math.pow(pos.x - cx, 2) + Math.pow(pos.y - cy, 2));
+                    
+                    if (dist <= headRadius * 1.05) {
+                        if (i === 0) {
+                            ctx.moveTo(pos.x, pos.y);
+                        } else {
+                            ctx.lineTo(pos.x, pos.y);
+                        }
+                    }
+                }
+                ctx.stroke();
+            }
+        }
+        
+        ctx.globalAlpha = 1;
+        
+        // Draw small dots at grid intersections
+        ctx.fillStyle = '#4a5568';
+        ctx.globalAlpha = 0.15;
+        for (const p of GridSystem.geodesicGrid) {
+            const pos = toTopoCoords(p.x, p.y, p.z, canvasSize);
+            const dist = Math.sqrt(Math.pow(pos.x - cx, 2) + Math.pow(pos.y - cy, 2));
+            
+            if (dist <= headRadius * 1.05) {
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, 1, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        ctx.globalAlpha = 1;
+    }
+    
+    // Now draw standard electrode position lines
+    if (gridDensity !== 'none') {
+        const lines = getGridLines();
+        
+        ctx.strokeStyle = '#2e7bc4';
+        ctx.lineWidth = 0.5;
+        ctx.globalAlpha = 0.2;
+        
+        for (const line of lines) {
+            const pos1 = toTopoCoords(line.from.x, line.from.y, line.from.z, canvasSize);
+            const pos2 = toTopoCoords(line.to.x, line.to.y, line.to.z, canvasSize);
+            
+            // Check both points are visible
+            const dist1 = Math.sqrt(Math.pow(pos1.x - cx, 2) + Math.pow(pos1.y - cy, 2));
+            const dist2 = Math.sqrt(Math.pow(pos2.x - cx, 2) + Math.pow(pos2.y - cy, 2));
+            
+            if (dist1 <= headRadius * 1.05 && dist2 <= headRadius * 1.05) {
+                ctx.beginPath();
+                ctx.moveTo(pos1.x, pos1.y);
+                ctx.lineTo(pos2.x, pos2.y);
+                ctx.stroke();
+            }
+        }
+        
+        ctx.globalAlpha = 1;
+    }
+    
+    // Now draw grid points with hierarchical sizes
+    for (const gridPoint of GridSystem.positions) {
+        const isOccupied = GridSystem.occupied.has(gridPoint.label);
+        const density = classifyElectrodeDensity(gridPoint.label);
+        
+        // Filter by density setting
+        if (gridDensity === '10-20' && density !== '10-20') continue;
+        if (gridDensity === '10-10' && density === '10-5') continue;
+        
+        const pos = toTopoCoords(gridPoint.x, gridPoint.y, gridPoint.z, canvasSize);
+        
+        // Check if within head outline
+        const distFromCenter = Math.sqrt(Math.pow(pos.x - cx, 2) + Math.pow(pos.y - cy, 2));
+        if (distFromCenter > headRadius * 1.1) continue;
+        
+        // Hierarchical sizes: 10-20 largest, 10-10 medium, 10-5 smallest
+        let radius, alpha, strokeWidth;
+        
+        if (density === '10-20') {
+            radius = 5;
+            alpha = isOccupied ? 0.3 : 0.7;
+            strokeWidth = 2;
+        } else if (density === '10-10') {
+            radius = 3.5;
+            alpha = isOccupied ? 0.2 : 0.5;
+            strokeWidth = 1.5;
+        } else { // 10-5
+            radius = 2.5;
+            alpha = isOccupied ? 0.15 : 0.35;
+            strokeWidth = 1;
+        }
+        
+        // Draw point
+        ctx.globalAlpha = alpha;
+        
+        // Fill color - different for occupied
+        if (isOccupied) {
+            ctx.fillStyle = '#95a5a6'; // Gray for occupied
+        } else {
+            ctx.fillStyle = '#4a90e2'; // Blue for available
+        }
+        
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Stroke for emphasis on major points
+        if (density === '10-20' || density === '10-10') {
+            ctx.strokeStyle = isOccupied ? '#7f8c8d' : '#2e7bc4';
+            ctx.lineWidth = strokeWidth;
+            ctx.stroke();
+        }
+        
+        // Label major (10-20) positions
+        if (density === '10-20' && !isOccupied) {
+            ctx.globalAlpha = 0.6;
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '8px JetBrains Mono';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'bottom';
+            ctx.fillText(gridPoint.label, pos.x, pos.y - radius - 2);
+        }
+    }
+    
+    ctx.restore();
+}
+
+/**
  * Convert spherical angles (theta, phi) to 3D cartesian
  * theta: azimuthal angle (0 = front/nose, positive = right)
  * phi: polar angle from top (0 = vertex, π/2 = equator)
@@ -524,6 +747,1764 @@ function sphericalToCartesian(theta, phi, radius = HEAD.radius) {
         y: radius * Math.sin(phi) * Math.cos(theta),
         z: radius * Math.cos(phi)
     };
+}
+
+/**
+ * Create a puck-shaped geometry (flat cylinder) for optodes
+ * More realistic than spheres - looks like actual fNIRS optodes
+ * @param {number} radius - Puck radius
+ * @param {number} height - Puck thickness (height)
+ * @returns {THREE.CylinderGeometry} Puck geometry
+ */
+function createPuckGeometry(radius, height = 2) {
+    // CylinderGeometry(radiusTop, radiusBottom, height, radialSegments)
+    return new THREE.CylinderGeometry(radius, radius, height, 32);
+}
+
+/**
+ * Orient puck to be tangent to head surface at given position
+ * Returns rotation matrix to align puck perpendicular to radius vector
+ * @param {Object} position - {x, y, z} position on head
+ * @returns {THREE.Quaternion} Rotation to align with surface normal
+ */
+function getPuckOrientation(position) {
+    // Compute normal vector (pointing outward from head center)
+    const len = Math.sqrt(position.x * position.x + position.y * position.y + position.z * position.z);
+    if (len === 0) return new THREE.Quaternion();
+    
+    const normal = new THREE.Vector3(
+        position.x / len,
+        position.y / len,
+        position.z / len
+    );
+    
+    // Default cylinder axis is Y-axis, we need to align it with normal
+    const up = new THREE.Vector3(0, 1, 0);
+    const quaternion = new THREE.Quaternion();
+    quaternion.setFromUnitVectors(up, normal);
+    
+    return quaternion;
+}
+
+/**
+ * Calculate photon migration path for fNIRS channel
+ * Models the "banana-shaped" trajectory of diffuse light through tissue
+ * Based on diffusion approximation for photon transport
+ * 
+ * Physics:
+ * - Light enters at source, travels through scattering medium (tissue)
+ * - Photon cloud spreads and penetrates to depth
+ * - Detected photons have curved paths (not straight line)
+ * - Penetration depth ≈ 0.4-0.5 × source-detector separation
+ * - Sensitivity is highest in middle of banana
+ * 
+ * @param {Object} source - Source position {x, y, z}
+ * @param {Object} detector - Detector position {x, y, z}
+ * @param {Object} options - Configuration options
+ * @returns {Object} Path data with curve points and sensitivity profile
+ */
+function calculatePhotonMigrationPath(source, detector, options = {}) {
+    const {
+        wavelength = 850,           // nm (affects absorption/scattering)
+        modulation = 0,             // MHz (0 = continuous wave)
+        tissueType = 'gray_matter', // Tissue optical properties
+        nPoints = 30                // Points along path for curve
+    } = options;
+    
+    // Source-detector separation (mm)
+    const dx = detector.x - source.x;
+    const dy = detector.y - source.y;
+    const dz = detector.z - source.z;
+    const separation = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    
+    // Penetration depth calculation
+    // Rule of thumb: depth ≈ 0.4-0.5 × separation for optimal SNR
+    // Shorter separations: more superficial
+    // Longer separations: deeper but worse SNR
+    const penetrationDepth = separation * 0.45;
+    
+    // Midpoint on surface
+    const midX = (source.x + detector.x) / 2;
+    const midY = (source.y + detector.y) / 2;
+    const midZ = (source.z + detector.z) / 2;
+    
+    // Direction vector from surface center to head center (inward normal)
+    const centerDist = Math.sqrt(midX * midX + midY * midY + midZ * midZ);
+    const inwardX = -midX / centerDist;
+    const inwardY = -midY / centerDist;
+    const inwardZ = -midZ / centerDist;
+    
+    // Deepest point of banana (moves inward from surface)
+    const apexX = midX + inwardX * penetrationDepth;
+    const apexY = midY + inwardY * penetrationDepth;
+    const apexZ = midZ + inwardZ * penetrationDepth;
+    
+    // Generate smooth curve using quadratic Bezier-like path
+    // This approximates the diffusion equation solution
+    const pathPoints = [];
+    const sensitivity = []; // Sensitivity weight at each point
+    
+    for (let i = 0; i <= nPoints; i++) {
+        const t = i / nPoints; // Parameter from 0 to 1
+        
+        // Quadratic curve (simplified banana shape)
+        // Uses control point at apex for smooth arc
+        const t1 = 1 - t;
+        const w0 = t1 * t1;           // Weight for source
+        const w1 = 2 * t * t1;         // Weight for apex (control point)
+        const w2 = t * t;              // Weight for detector
+        
+        const x = w0 * source.x + w1 * apexX + w2 * detector.x;
+        const y = w0 * source.y + w1 * apexY + w2 * detector.y;
+        const z = w0 * source.z + w1 * apexZ + w2 * detector.z;
+        
+        pathPoints.push(new THREE.Vector3(x, y, z));
+        
+        // Sensitivity profile: Gaussian-like, peaks in middle
+        // This represents relative contribution to fNIRS signal
+        const distFromMid = Math.abs(t - 0.5);
+        const sens = Math.exp(-8 * distFromMid * distFromMid);
+        sensitivity.push(sens);
+    }
+    
+    // Calculate optical properties (for future use in reconstruction)
+    const opticalProperties = getOpticalProperties(tissueType, wavelength);
+    
+    return {
+        pathPoints: pathPoints,
+        sensitivity: sensitivity,
+        penetrationDepth: penetrationDepth,
+        separation: separation,
+        apex: new THREE.Vector3(apexX, apexY, apexZ),
+        opticalProperties: opticalProperties,
+        wavelength: wavelength
+    };
+}
+
+/**
+ * Get optical properties for tissue type at given wavelength
+ * Based on published values for fNIRS
+ * 
+ * @param {string} tissueType - Type of tissue
+ * @param {number} wavelength - Wavelength in nm
+ * @returns {Object} Optical properties (μa, μs', n, g)
+ */
+function getOpticalProperties(tissueType, wavelength) {
+    // Simplified optical properties for common fNIRS wavelengths
+    // μa: absorption coefficient (mm^-1)
+    // μs': reduced scattering coefficient (mm^-1)
+    // n: refractive index
+    // g: anisotropy factor
+    
+    const properties = {
+        gray_matter: {
+            760: { ua: 0.025, usp: 1.1, n: 1.4, g: 0.9 },
+            850: { ua: 0.020, usp: 1.0, n: 1.4, g: 0.9 }
+        },
+        white_matter: {
+            760: { ua: 0.018, usp: 9.0, n: 1.4, g: 0.9 },
+            850: { ua: 0.016, usp: 8.5, n: 1.4, g: 0.9 }
+        },
+        scalp: {
+            760: { ua: 0.018, usp: 0.7, n: 1.4, g: 0.8 },
+            850: { ua: 0.015, usp: 0.65, n: 1.4, g: 0.8 }
+        },
+        skull: {
+            760: { ua: 0.012, usp: 1.6, n: 1.4, g: 0.9 },
+            850: { ua: 0.010, usp: 1.5, n: 1.4, g: 0.9 }
+        }
+    };
+    
+    // Interpolate if exact wavelength not available
+    const tissue = properties[tissueType] || properties.gray_matter;
+    
+    if (tissue[wavelength]) {
+        return tissue[wavelength];
+    }
+    
+    // Simple linear interpolation between 760 and 850 nm
+    const w1 = 760, w2 = 850;
+    const t = (wavelength - w1) / (w2 - w1);
+    const p1 = tissue[w1];
+    const p2 = tissue[w2];
+    
+    return {
+        ua: p1.ua + t * (p2.ua - p1.ua),
+        usp: p1.usp + t * (p2.usp - p1.usp),
+        n: p1.n,
+        g: p1.g
+    };
+}
+
+/**
+ * Generate brain cortical surface mesh
+ * Creates a smoothed sphere approximating the cortical surface
+ * Based on MNE's fsaverage surface, simplified for web
+ */
+function generateBrainSurface() {
+    console.log('Generating brain cortical surface...');
+    
+    // Create icosphere (geodesic sphere) for smooth cortical surface
+    // This is similar to MNE's inflated brain surface
+    // Position at typical cortical depth: scalp (~95mm) minus typical penetration (~12-15mm)
+    const radius = 82;  // Cortical surface depth (scalp at ~95mm, cortex at ~80-85mm)
+    const detail = 4;   // Subdivision level (higher = more vertices)
+    
+    // Start with icosahedron
+    const t = (1.0 + Math.sqrt(5.0)) / 2.0;
+    const vertices = [];
+    const faces = [];
+    
+    // Initial vertices of icosahedron
+    // Note: In MNE coordinates, +Z is superior (up), -Z is inferior (down)
+    // We'll filter out inferior vertices later (below brainstem)
+    const initialVerts = [
+        [-1,  t,  0], [ 1,  t,  0], [-1, -t,  0], [ 1, -t,  0],
+        [ 0, -1,  t], [ 0,  1,  t], [ 0, -1, -t], [ 0,  1, -t],
+        [ t,  0, -1], [ t,  0,  1], [-t,  0, -1], [-t,  0,  1]
+    ];
+    
+    for (const v of initialVerts) {
+        const len = Math.sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+        vertices.push({
+            x: radius * v[0] / len,
+            y: radius * v[1] / len,
+            z: radius * v[2] / len,
+            sensitivity: 0,
+            vertexId: vertices.length
+        });
+    }
+    
+    // Initial faces of icosahedron
+    const initialFaces = [
+        [0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
+        [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
+        [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
+        [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]
+    ];
+    
+    for (const f of initialFaces) {
+        faces.push([f[0], f[1], f[2]]);
+    }
+    
+    // Subdivide for smoothness (tessellation)
+    for (let i = 0; i < detail; i++) {
+        const newFaces = [];
+        const midpointCache = {};
+        
+        const getMidpoint = (i1, i2) => {
+            const key = Math.min(i1, i2) + '_' + Math.max(i1, i2);
+            if (midpointCache[key] !== undefined) {
+                return midpointCache[key];
+            }
+            
+            const v1 = vertices[i1];
+            const v2 = vertices[i2];
+            const mx = (v1.x + v2.x) / 2;
+            const my = (v1.y + v2.y) / 2;
+            const mz = (v1.z + v2.z) / 2;
+            
+            // Project to sphere
+            const len = Math.sqrt(mx*mx + my*my + mz*mz);
+            const newIdx = vertices.length;
+            vertices.push({
+                x: radius * mx / len,
+                y: radius * my / len,
+                z: radius * mz / len,
+                sensitivity: 0,
+                vertexId: newIdx
+            });
+            
+            midpointCache[key] = newIdx;
+            return newIdx;
+        };
+        
+        for (const face of faces) {
+            const a = face[0], b = face[1], c = face[2];
+            const ab = getMidpoint(a, b);
+            const bc = getMidpoint(b, c);
+            const ca = getMidpoint(c, a);
+            
+            newFaces.push([a, ab, ca]);
+            newFaces.push([b, bc, ab]);
+            newFaces.push([c, ca, bc]);
+            newFaces.push([ab, bc, ca]);
+        }
+        
+        faces.length = 0;
+        faces.push(...newFaces);
+    }
+    
+    // Assign brain regions to vertices based on position
+    // This creates a simple parcellation for ROI selection
+    for (const vertex of vertices) {
+        vertex.region = assignVertexToRegion(vertex);
+    }
+    
+    // Filter out inferior vertices (below brainstem level)
+    // Keep only vertices where z > -20mm (above neck/brainstem)
+    const zThreshold = -20;  // mm
+    const vertexMap = {};  // Old index to new index
+    const filteredVertices = [];
+    let newIdx = 0;
+    
+    for (let i = 0; i < vertices.length; i++) {
+        if (vertices[i].z > zThreshold) {
+            vertexMap[i] = newIdx;
+            vertices[i].vertexId = newIdx;
+            filteredVertices.push(vertices[i]);
+            newIdx++;
+        }
+    }
+    
+    // Filter faces to only include those with all vertices above threshold
+    const filteredFaces = [];
+    for (const face of faces) {
+        if (vertexMap[face[0]] !== undefined && 
+            vertexMap[face[1]] !== undefined && 
+            vertexMap[face[2]] !== undefined) {
+            filteredFaces.push([
+                vertexMap[face[0]],
+                vertexMap[face[1]],
+                vertexMap[face[2]]
+            ]);
+        }
+    }
+    
+    BRAIN_SURFACE.vertices = filteredVertices;
+    BRAIN_SURFACE.faces = filteredFaces;
+    
+    // Build region index (map region names to vertex indices)
+    BRAIN_SURFACE.regions = {};
+    for (let i = 0; i < filteredVertices.length; i++) {
+        const region = filteredVertices[i].region;
+        if (!BRAIN_SURFACE.regions[region]) {
+            BRAIN_SURFACE.regions[region] = [];
+        }
+        BRAIN_SURFACE.regions[region].push(i);
+    }
+    
+    console.log(`Brain surface generated: ${filteredVertices.length} vertices, ${filteredFaces.length} faces`);
+    console.log(`  (Filtered out ${vertices.length - filteredVertices.length} inferior vertices)`);
+    console.log(`  Regions: ${Object.keys(BRAIN_SURFACE.regions).join(', ')}`);
+    
+    return { vertices: filteredVertices, faces: filteredFaces };
+}
+
+/**
+ * Assign a vertex to a brain region based on its 3D position
+ * Creates a simple parcellation of the cortical surface
+ */
+function assignVertexToRegion(vertex) {
+    const { x, y, z } = vertex;
+    
+    // Determine hemisphere
+    const isLeft = x < 0;
+    const hemisphere = isLeft ? 'Left' : 'Right';
+    
+    // Determine anterior-posterior region
+    let regionName;
+    if (y > 40) {
+        regionName = 'Frontal';  // Front of head
+    } else if (y > -20) {
+        // Temporal or Central based on lateral position
+        if (Math.abs(x) > 60) {
+            regionName = 'Temporal';  // Sides
+        } else if (z > 60) {
+            regionName = 'Parietal';  // Top-middle
+        } else {
+            regionName = 'Temporal';  // Lower sides
+        }
+    } else if (y > -80) {
+        regionName = 'Parietal';  // Middle-back
+    } else {
+        regionName = 'Occipital';  // Back
+    }
+    
+    return `${hemisphere} ${regionName}`;
+}
+
+/**
+ * Project voxel sensitivity onto brain surface vertices
+ * For each vertex, find nearby voxels and interpolate sensitivity
+ */
+function projectSensitivityToSurface() {
+    if (!VoxelGrid.sensitivityMatrix) {
+        console.warn('No sensitivity matrix to project');
+        return;
+    }
+    
+    if (!BRAIN_SURFACE.vertices || BRAIN_SURFACE.vertices.length === 0) {
+        generateBrainSurface();
+    }
+    
+    console.log('Projecting sensitivity to cortical surface...');
+    
+    // For each surface vertex, find nearest voxels and interpolate
+    for (const vertex of BRAIN_SURFACE.vertices) {
+        let totalSensitivity = 0;
+        let totalWeight = 0;
+        
+        // Search nearby voxels (within 10mm)
+        const searchRadius = 10;
+        
+        for (const voxel of VoxelGrid.voxels) {
+            if (!voxel.isInsideHead || voxel.totalSensitivity === 0) continue;
+            
+            const dx = voxel.x - vertex.x;
+            const dy = voxel.y - vertex.y;
+            const dz = voxel.z - vertex.z;
+            const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+            
+            if (dist < searchRadius) {
+                // Inverse distance weighting
+                const weight = 1.0 / (dist + 1.0);  // +1 to avoid division by zero
+                totalSensitivity += voxel.totalSensitivity * weight;
+                totalWeight += weight;
+            }
+        }
+        
+        if (totalWeight > 0) {
+            vertex.sensitivity = totalSensitivity / totalWeight;
+        } else {
+            vertex.sensitivity = 0;
+        }
+    }
+    
+    console.log('Sensitivity projection complete');
+}
+
+/**
+ * Voxel Grid System for Brain Volume
+ * Defines a 3D grid covering the brain for source reconstruction
+ */
+const VoxelGrid = {
+    // Grid parameters
+    bounds: {
+        xMin: -80, xMax: 80,  // mm (left-right)
+        yMin: -80, yMax: 80,  // mm (posterior-anterior)
+        zMin: -20, zMax: 100  // mm (inferior-superior)
+    },
+    resolution: 5,  // mm (voxel size)
+    
+    // Computed properties
+    dimensions: { nx: 0, ny: 0, nz: 0 },
+    totalVoxels: 0,
+    voxels: [],
+    
+    // Sensitivity matrix: channels × voxels
+    // Sparse storage: only non-zero entries
+    sensitivityMatrix: null,
+    
+    /**
+     * Initialize voxel grid
+     */
+    initialize() {
+        const res = this.resolution;
+        const b = this.bounds;
+        
+        // Calculate dimensions
+        this.dimensions.nx = Math.ceil((b.xMax - b.xMin) / res);
+        this.dimensions.ny = Math.ceil((b.yMax - b.yMin) / res);
+        this.dimensions.nz = Math.ceil((b.zMax - b.zMin) / res);
+        this.totalVoxels = this.dimensions.nx * this.dimensions.ny * this.dimensions.nz;
+        
+        // Create voxel array
+        this.voxels = [];
+        let voxelId = 0;
+        
+        for (let ix = 0; ix < this.dimensions.nx; ix++) {
+            for (let iy = 0; iy < this.dimensions.ny; iy++) {
+                for (let iz = 0; iz < this.dimensions.nz; iz++) {
+                    const x = b.xMin + (ix + 0.5) * res;
+                    const y = b.yMin + (iy + 0.5) * res;
+                    const z = b.zMin + (iz + 0.5) * res;
+                    
+                    // Check if voxel is inside head (approximate sphere)
+                    const distFromCenter = Math.sqrt(x*x + y*y + z*z);
+                    const isInsideHead = distFromCenter < 95;  // 95mm radius
+                    
+                    this.voxels.push({
+                        id: voxelId++,
+                        ix, iy, iz,
+                        x, y, z,
+                        isInsideHead,
+                        sensitivity: {},  // Map: channelId -> sensitivity weight
+                        totalSensitivity: 0
+                    });
+                }
+            }
+        }
+        
+        console.log(`Voxel grid initialized:`);
+        console.log(`  Resolution: ${res}mm`);
+        console.log(`  Dimensions: ${this.dimensions.nx} × ${this.dimensions.ny} × ${this.dimensions.nz}`);
+        console.log(`  Total voxels: ${this.totalVoxels}`);
+        console.log(`  Inside head: ${this.voxels.filter(v => v.isInsideHead).length}`);
+    },
+    
+    /**
+     * Get voxel containing a 3D point
+     */
+    getVoxelAt(x, y, z) {
+        const b = this.bounds;
+        const res = this.resolution;
+        
+        if (x < b.xMin || x > b.xMax || 
+            y < b.yMin || y > b.yMax || 
+            z < b.zMin || z > b.zMax) {
+            return null;
+        }
+        
+        const ix = Math.floor((x - b.xMin) / res);
+        const iy = Math.floor((y - b.yMin) / res);
+        const iz = Math.floor((z - b.zMin) / res);
+        
+        if (ix < 0 || ix >= this.dimensions.nx ||
+            iy < 0 || iy >= this.dimensions.ny ||
+            iz < 0 || iz >= this.dimensions.nz) {
+            return null;
+        }
+        
+        const voxelIndex = ix * this.dimensions.ny * this.dimensions.nz + 
+                          iy * this.dimensions.nz + iz;
+        
+        return this.voxels[voxelIndex];
+    }
+};
+
+/**
+ * Calculate voxel-wise sensitivity for a photon migration path
+ * Integrates the path through voxel grid, weighting by photon density
+ * 
+ * This builds the forward model: Signal = Σ(sensitivity × Δμa × path_length)
+ * 
+ * @param {Object} pathData - From calculatePhotonMigrationPath()
+ * @param {string} channelId - Channel identifier
+ * @returns {Object} Voxel sensitivity map
+ */
+function calculateVoxelSensitivity(pathData, channelId) {
+    if (!VoxelGrid.voxels || VoxelGrid.voxels.length === 0) {
+        console.warn('Voxel grid not initialized');
+        return {};
+    }
+    
+    const voxelSensitivity = {};  // voxelId -> sensitivity weight
+    const pathPoints = pathData.pathPoints;
+    const sensitivity = pathData.sensitivity;
+    
+    // Integrate along path
+    for (let i = 0; i < pathPoints.length - 1; i++) {
+        const p1 = pathPoints[i];
+        const p2 = pathPoints[i + 1];
+        
+        // Average sensitivity along this segment
+        const segmentSens = (sensitivity[i] + sensitivity[i + 1]) / 2;
+        
+        // Segment length
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const dz = p2.z - p1.z;
+        const segmentLength = Math.sqrt(dx*dx + dy*dy + dz*dz);
+        
+        // March along segment, sampling voxels
+        const nSteps = Math.ceil(segmentLength / (VoxelGrid.resolution * 0.5));
+        
+        for (let step = 0; step <= nSteps; step++) {
+            const t = step / nSteps;
+            const x = p1.x + t * dx;
+            const y = p1.y + t * dy;
+            const z = p1.z + t * dz;
+            
+            const voxel = VoxelGrid.getVoxelAt(x, y, z);
+            if (voxel && voxel.isInsideHead) {
+                // Weight contribution by:
+                // 1. Path sensitivity (banana-shaped profile)
+                // 2. Segment length
+                // 3. Optical properties (future: tissue-specific)
+                
+                const weight = segmentSens * (segmentLength / nSteps);
+                
+                if (!voxelSensitivity[voxel.id]) {
+                    voxelSensitivity[voxel.id] = 0;
+                }
+                voxelSensitivity[voxel.id] += weight;
+                
+                // Store in voxel for visualization
+                if (!voxel.sensitivity[channelId]) {
+                    voxel.sensitivity[channelId] = 0;
+                }
+                voxel.sensitivity[channelId] += weight;
+                voxel.totalSensitivity += weight;
+            }
+        }
+    }
+    
+    return voxelSensitivity;
+}
+
+/**
+ * Build complete sensitivity matrix for all channels
+ * Matrix A[channels × voxels] where A[i,j] = sensitivity of channel i to voxel j
+ * 
+ * For source reconstruction: ΔOD = A × Δμa
+ * To solve: Δμa = (A^T A + λI)^-1 A^T ΔOD
+ * 
+ * @returns {Object} Sparse sensitivity matrix and metadata
+ */
+function buildSensitivityMatrix() {
+    console.log('Building sensitivity matrix...');
+    
+    if (!VoxelGrid.voxels || VoxelGrid.voxels.length === 0) {
+        VoxelGrid.initialize();
+    }
+    
+    if (!AppState.channels || AppState.channels.length === 0) {
+        console.warn('No channels available. Create a montage first.');
+        return null;
+    }
+    
+    // Reset voxel sensitivities
+    for (const voxel of VoxelGrid.voxels) {
+        voxel.sensitivity = {};
+        voxel.totalSensitivity = 0;
+    }
+    
+    // Sparse matrix storage: array of {channel, voxel, weight}
+    const sparseEntries = [];
+    const channelVoxelMaps = {};  // channelId -> {voxelId: weight}
+    
+    let channelIndex = 0;
+    for (const channel of AppState.channels) {
+        if (!channel.photonPath) {
+            console.warn(`Channel ${channel.id} missing photon path`);
+            continue;
+        }
+        
+        const voxelSens = calculateVoxelSensitivity(channel.photonPath, channel.id);
+        channelVoxelMaps[channel.id] = voxelSens;
+        
+        // Add to sparse matrix
+        for (const [voxelId, weight] of Object.entries(voxelSens)) {
+            if (weight > 1e-6) {  // Threshold for numerical stability
+                sparseEntries.push({
+                    channel: channelIndex,
+                    channelId: channel.id,
+                    voxel: parseInt(voxelId),
+                    weight: weight
+                });
+            }
+        }
+        
+        channelIndex++;
+    }
+    
+    const matrix = {
+        sparse: sparseEntries,
+        nChannels: AppState.channels.length,
+        nVoxels: VoxelGrid.totalVoxels,
+        nNonZero: sparseEntries.length,
+        sparsity: 1 - (sparseEntries.length / (AppState.channels.length * VoxelGrid.totalVoxels)),
+        channelMaps: channelVoxelMaps
+    };
+    
+    VoxelGrid.sensitivityMatrix = matrix;
+    
+    console.log(`Sensitivity matrix built:`);
+    console.log(`  Channels: ${matrix.nChannels}`);
+    console.log(`  Voxels: ${matrix.nVoxels}`);
+    console.log(`  Non-zero entries: ${matrix.nNonZero}`);
+    console.log(`  Sparsity: ${(matrix.sparsity * 100).toFixed(2)}%`);
+    console.log(`  Avg voxels per channel: ${(matrix.nNonZero / matrix.nChannels).toFixed(1)}`);
+    
+    return matrix;
+}
+
+/**
+ * Project a 3D position onto the standard head surface
+ * Ensures all optodes sit on a consistent spherical surface
+ * NOTE: This is a simplified projection. For accurate coregistration,
+ * use the coregisterOptodes() function which implements fiducial-based
+ * alignment and surface fitting.
+ */
+function projectToHeadSurface(pos, radius = HEAD.radius) {
+    const len = Math.sqrt(pos.x*pos.x + pos.y*pos.y + pos.z*pos.z);
+    if (len === 0) {
+        // Handle zero-length vector (shouldn't happen, but be safe)
+        return { x: 0, y: radius, z: 0 };
+    }
+    const scale = radius / len;
+    return {
+        x: pos.x * scale,
+        y: pos.y * scale,
+        z: pos.z * scale
+    };
+}
+
+// ============================================================
+// Standardized Grid System (10-20/10-10/10-5 Based)
+// ============================================================
+
+/**
+ * Grid system state - standardized optode placement positions
+ * Based on extended 10-20 system (10-5 density) for fNIRS best practices
+ */
+const GridSystem = {
+    // All available grid positions (from 10-5 electrode system)
+    positions: [],
+    
+    // Grid positions organized by region
+    byRegion: {},
+    
+    // Occupied positions (to prevent overlap)
+    occupied: new Set(),
+    
+    // Configuration
+    config: {
+        enabled: true,
+        snapDistance: 15,  // mm - max distance to snap to grid point
+        minSpacing: 25,    // mm - minimum distance between optodes
+        showGrid: true,    // Show grid points in visualization
+        allowOffGrid: false // Allow placement off-grid (with warning)
+    }
+};
+
+/**
+ * Generate complete geodesic grid covering entire head surface
+ * Uses surface distance (arc length) like measuring tape, not angular spacing
+ * This matches how the 10-20 system is actually measured (e.g., 10% from inion, 20% intervals)
+ * 
+ * In the 10-20 system, measurements are made with a tape measure along the curved surface:
+ * - Nasion to inion over vertex (anterior-posterior)
+ * - Left to right preauricular points over vertex (lateral)
+ * - Positions are defined as percentages of these curved distances
+ * 
+ * @param {number} surfaceSpacing - Spacing in mm along surface (default 15mm)
+ * @returns {Array} Array of grid positions
+ */
+function generateGeodesicGrid(surfaceSpacing = 15) {
+    const grid = [];
+    
+    // Use actual head measurements from anatomical data
+    // The 10-20 system measures surface distances (like using a cloth tape measure)
+    // Typical adult head: nasion-inion distance along scalp is ~350-360mm
+    
+    // For our spherical approximation, use the radius that matches real electrode positions
+    // Most electrodes are positioned at ~100mm from origin (not 85mm)
+    const radius = 100;  // Use larger radius to match actual electrode positions
+    
+    // Calculate phi range to cover from front (nasion area) to back (inion area)
+    // In spherical coords: phi = 0 is top (z-axis), phi = π/2 is equator
+    // We want to cover approximately from phi ≈ 0.4 rad (front, ~20°) to phi ≈ 2.3 rad (back, ~130°)
+    
+    const phiFront = 0.4;   // Front of head (includes forehead)
+    const phiBack = 2.3;    // Back of head (includes occipital)
+    
+    // Total arc length from front to back along midline
+    const arcLengthAP = radius * (phiBack - phiFront);
+    
+    // Calculate number of divisions based on surface spacing
+    const nDivisionsAP = Math.ceil(arcLengthAP / surfaceSpacing);
+    const phiStep = (phiBack - phiFront) / nDivisionsAP;
+    
+    let gridId = 0;
+    
+    // Generate grid using surface-distance-based spacing
+    for (let i = 0; i <= nDivisionsAP; i++) {
+        const phi = phiFront + i * phiStep;
+        
+        // At this latitude, calculate circumference
+        const circumference = 2 * Math.PI * radius * Math.sin(phi);
+        
+        // Number of points around this latitude based on surface spacing
+        // Ensure we have at least 4 points even near poles
+        const nPointsInRing = Math.max(4, Math.round(circumference / surfaceSpacing));
+        const thetaStep = (2 * Math.PI) / nPointsInRing;
+        
+        for (let j = 0; j < nPointsInRing; j++) {
+            const theta = j * thetaStep;
+            
+            // Convert to Cartesian coordinates
+            const pos = sphericalToCartesian(theta, phi, radius);
+            
+            // Calculate percentage distances for 10-20 style labeling
+            const arcFromFront = radius * (phi - phiFront);
+            const percentAP = (arcFromFront / arcLengthAP) * 100;
+            
+            grid.push({
+                id: gridId++,
+                x: pos.x,
+                y: pos.y,
+                z: pos.z,
+                theta: theta,
+                phi: phi,
+                type: 'geodesic',
+                label: `G${gridId}`,
+                arcDistance: arcFromFront,
+                percentAP: percentAP  // Anterior-posterior percentage (0=front, 100=back)
+            });
+        }
+    }
+    
+    console.log(`Generated geodesic grid:`);
+    console.log(`  Surface spacing: ${surfaceSpacing}mm`);
+    console.log(`  Effective radius: ${radius}mm`);
+    console.log(`  Arc length (front-back): ${arcLengthAP.toFixed(1)}mm`);
+    console.log(`  AP divisions: ${nDivisionsAP}`);
+    console.log(`  Total grid points: ${grid.length}`);
+    
+    return grid;
+}
+
+/**
+ * Initialize grid system with both standard positions and geodesic grid
+ * Uses all available 10-5 positions as potential optode locations
+ * Plus generates complete geodesic mesh
+ */
+function initializeGridSystem() {
+    // Standard electrode positions (for snapping and selection)
+    GridSystem.positions = [];
+    GridSystem.byRegion = {
+        frontal: [],
+        central: [],
+        parietal: [],
+        occipital: [],
+        temporal: [],
+        other: []
+    };
+    
+    // Convert all electrode positions to grid points
+    for (const [name, electrode] of Object.entries(ELECTRODES_1020)) {
+        const gridPoint = {
+            x: electrode.x,
+            y: electrode.y,
+            z: electrode.z,
+            label: name,
+            type: 'standard',
+            region: classifyElectrodeRegion(name),
+            density: classifyElectrodeDensity(name)
+        };
+        
+        GridSystem.positions.push(gridPoint);
+        GridSystem.byRegion[gridPoint.region].push(gridPoint);
+    }
+    
+    // Generate complete geodesic grid mesh (surface distance based)
+    const gridSpacing = document.getElementById('geodesic-spacing')?.value || 15;
+    GridSystem.geodesicGrid = generateGeodesicGrid(parseFloat(gridSpacing));
+    
+    // Initialize voxel grid for source reconstruction
+    VoxelGrid.initialize();
+    
+    console.log(`Grid system initialized:`);
+    console.log(`  Standard positions: ${GridSystem.positions.length}`);
+    console.log(`  Geodesic grid: ${GridSystem.geodesicGrid.length} positions`);
+    console.log(`  Frontal: ${GridSystem.byRegion.frontal.length}`);
+    console.log(`  Central: ${GridSystem.byRegion.central.length}`);
+    console.log(`  Parietal: ${GridSystem.byRegion.parietal.length}`);
+    console.log(`  Temporal: ${GridSystem.byRegion.temporal.length}`);
+    console.log(`  Occipital: ${GridSystem.byRegion.occipital.length}`);
+}
+
+/**
+ * Classify electrode into anatomical region based on standard naming
+ */
+function classifyElectrodeRegion(name) {
+    if (name.match(/^(Fp|AF|F)/)) return 'frontal';
+    if (name.match(/^(FC|C|CP)/)) return 'central';
+    if (name.match(/^P/)) return 'parietal';
+    if (name.match(/^O/)) return 'occipital';
+    if (name.match(/^(FT|T|TP)/)) return 'temporal';
+    return 'other';
+}
+
+/**
+ * Classify electrode by density level (10-20, 10-10, or 10-5)
+ * Based on standard electrode naming conventions
+ */
+function classifyElectrodeDensity(name) {
+    // 10-20 System: Original 21 positions
+    const standard1020 = [
+        'Fp1', 'Fp2', 'F7', 'F3', 'Fz', 'F4', 'F8',
+        'T3', 'C3', 'Cz', 'C4', 'T4',
+        'T5', 'P3', 'Pz', 'P4', 'T6',
+        'O1', 'Oz', 'O2',
+        'A1', 'A2'  // Reference electrodes
+    ];
+    
+    if (standard1020.includes(name)) {
+        return '10-20';
+    }
+    
+    // 10-10 System: Intermediate positions (no odd numbers beyond 3,4)
+    // Pattern: Letters with even numbers or z, but not 5,7,9
+    if (name.match(/^[A-Z]+[zZ]$/) || 
+        name.match(/^[A-Z]+[2468]$/) ||
+        name.match(/^[A-Z]+[246]h?$/)) {
+        return '10-10';
+    }
+    
+    // Everything else is 10-5 (high density)
+    return '10-5';
+}
+
+/**
+ * Get grid lines connecting positions in same row/column
+ * Creates the visible grid structure
+ */
+function getGridLines() {
+    const lines = [];
+    
+    // Organize positions by anterior-posterior rows (same Y approximately)
+    const rowTolerance = 15; // mm
+    const rows = {};
+    
+    for (const pos of GridSystem.positions) {
+        // Round Y coordinate to nearest 15mm to group into rows
+        const rowKey = Math.round(pos.y / rowTolerance) * rowTolerance;
+        if (!rows[rowKey]) rows[rowKey] = [];
+        rows[rowKey].push(pos);
+    }
+    
+    // Create lines within each row (left-right connections)
+    for (const rowPositions of Object.values(rows)) {
+        // Sort by X coordinate (left to right)
+        rowPositions.sort((a, b) => a.x - b.x);
+        
+        // Connect adjacent positions
+        for (let i = 0; i < rowPositions.length - 1; i++) {
+            const pos1 = rowPositions[i];
+            const pos2 = rowPositions[i + 1];
+            
+            // Only connect if reasonably close in X
+            const dx = Math.abs(pos2.x - pos1.x);
+            if (dx < 30) { // mm
+                lines.push({
+                    from: pos1,
+                    to: pos2,
+                    type: 'lateral'
+                });
+            }
+        }
+    }
+    
+    // Organize by lateral columns (same X approximately)
+    const colTolerance = 15; // mm
+    const cols = {};
+    
+    for (const pos of GridSystem.positions) {
+        const colKey = Math.round(pos.x / colTolerance) * colTolerance;
+        if (!cols[colKey]) cols[colKey] = [];
+        cols[colKey].push(pos);
+    }
+    
+    // Create lines within each column (front-back connections)
+    for (const colPositions of Object.values(cols)) {
+        // Sort by Y coordinate (front to back)
+        colPositions.sort((a, b) => b.y - a.y); // Higher Y = more anterior
+        
+        // Connect adjacent positions
+        for (let i = 0; i < colPositions.length - 1; i++) {
+            const pos1 = colPositions[i];
+            const pos2 = colPositions[i + 1];
+            
+            // Only connect if reasonably close in Y
+            const dy = Math.abs(pos2.y - pos1.y);
+            if (dy < 30) { // mm
+                lines.push({
+                    from: pos1,
+                    to: pos2,
+                    type: 'anteroposterior'
+                });
+            }
+        }
+    }
+    
+    return lines;
+}
+
+/**
+ * Find nearest grid position to a given point
+ * @param {Object} point - {x, y, z} position to snap
+ * @param {Object} options - Filtering options
+ * @returns {Object} Nearest grid point or null if none within snapDistance
+ */
+function snapToGrid(point, options = {}) {
+    const opts = {
+        region: null,           // Filter by region
+        excludeOccupied: true,  // Skip already occupied positions
+        maxDistance: GridSystem.config.snapDistance,
+        ...options
+    };
+    
+    let positions = GridSystem.positions;
+    
+    // Filter by region if specified
+    if (opts.region) {
+        positions = GridSystem.byRegion[opts.region] || [];
+    }
+    
+    let nearestDist = Infinity;
+    let nearest = null;
+    
+    for (const gridPoint of positions) {
+        // Skip occupied positions if requested
+        if (opts.excludeOccupied && GridSystem.occupied.has(gridPoint.label)) {
+            continue;
+        }
+        
+        const dist = distance3D(point, gridPoint);
+        
+        if (dist < nearestDist && dist <= opts.maxDistance) {
+            nearestDist = dist;
+            nearest = gridPoint;
+        }
+    }
+    
+    return nearest;
+}
+
+/**
+ * Get available (unoccupied) grid positions
+ * @param {Object} options - Filter options
+ * @returns {Array} Array of available grid positions
+ */
+function getAvailableGridPositions(options = {}) {
+    const opts = {
+        region: null,
+        minSpacing: GridSystem.config.minSpacing,
+        ...options
+    };
+    
+    let positions = GridSystem.positions;
+    
+    // Filter by region
+    if (opts.region) {
+        positions = GridSystem.byRegion[opts.region] || [];
+    }
+    
+    // Filter out occupied positions
+    const available = positions.filter(p => !GridSystem.occupied.has(p.label));
+    
+    // If minSpacing specified, ensure spacing from occupied positions
+    if (opts.minSpacing > 0 && GridSystem.occupied.size > 0) {
+        return available.filter(gridPoint => {
+            // Check distance to all occupied positions
+            for (const occupiedLabel of GridSystem.occupied) {
+                const occupied = GridSystem.positions.find(p => p.label === occupiedLabel);
+                if (occupied && distance3D(gridPoint, occupied) < opts.minSpacing) {
+                    return false;
+                }
+            }
+            return true;
+        });
+    }
+    
+    return available;
+}
+
+/**
+ * Mark grid position as occupied
+ */
+function occupyGridPosition(label) {
+    GridSystem.occupied.add(label);
+}
+
+/**
+ * Release grid position
+ */
+function releaseGridPosition(label) {
+    GridSystem.occupied.delete(label);
+}
+
+/**
+ * Clear all occupied positions
+ */
+function clearOccupiedGrid() {
+    GridSystem.occupied.clear();
+}
+
+/**
+ * Select optimal grid positions for a region-based montage
+ * Uses greedy selection to maximize coverage within region
+ * 
+ * @param {Array} regionNames - Array of region names from BRAIN_REGIONS
+ * @param {Number} nSources - Target number of sources
+ * @param {Number} nDetectors - Target number of detectors
+ * @returns {Object} {sources: [...], detectors: [...]}
+ */
+function selectGridPositionsForRegions(regionNames, nSources, nDetectors) {
+    const sources = [];
+    const detectors = [];
+    
+    // If no regions selected, distribute evenly over whole head
+    if (regionNames.length === 0) {
+        return distributeOptodesEvenlyOverHead(nSources, nDetectors);
+    }
+    
+    // Get grid positions within selected ROIs
+    // For each ROI, classify positions by distance from center
+    const roiPositions = [];  // Array of {region, pos, distFromCenter}
+    
+    for (const regionName of regionNames) {
+        const region = BRAIN_REGIONS[regionName];
+        if (!region) continue;
+        
+        const cx = region.x;
+        const cy = region.y;
+        const cz = region.z;
+        const regionRadius = region.radius;
+        
+        // Find all grid positions within this ROI
+        for (const pos of GridSystem.positions) {
+            const dx = pos.x - cx;
+            const dy = pos.y - cy;
+            const dz = pos.z - cz;
+            const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+            
+            // Include positions within 1.2× radius for good coverage
+            if (dist < regionRadius * 1.2) {
+                roiPositions.push({
+                    region: regionName,
+                    pos: pos,
+                    distFromCenter: dist,
+                    regionRadius: regionRadius
+                });
+            }
+        }
+    }
+    
+    if (roiPositions.length === 0) {
+        console.warn('No grid positions found in selected ROIs, using whole head');
+        return distributeOptodesEvenlyOverHead(nSources, nDetectors);
+    }
+    
+    // Remove duplicates (positions might be in multiple overlapping ROIs)
+    const uniquePositions = [];
+    const seenKeys = new Set();
+    for (const item of roiPositions) {
+        const key = `${item.pos.x.toFixed(2)},${item.pos.y.toFixed(2)},${item.pos.z.toFixed(2)}`;
+        if (!seenKeys.has(key)) {
+            seenKeys.add(key);
+            uniquePositions.push(item);
+        }
+    }
+    
+    // Intersperse sources and detectors using a checkerboard pattern
+    // Sort positions by a spatial hash to create consistent checkerboard pattern
+    uniquePositions.sort((a, b) => {
+        // Create spatial grid cells for consistent ordering
+        const cellSize = 20; // mm
+        const ax = Math.floor(a.pos.x / cellSize);
+        const ay = Math.floor(a.pos.y / cellSize);
+        const az = Math.floor(a.pos.z / cellSize);
+        const bx = Math.floor(b.pos.x / cellSize);
+        const by = Math.floor(b.pos.y / cellSize);
+        const bz = Math.floor(b.pos.z / cellSize);
+        
+        // Sort by z, then y, then x for consistent ordering
+        if (az !== bz) return az - bz;
+        if (ay !== by) return ay - by;
+        return ax - bx;
+    });
+    
+    // Calculate target source/detector ratio
+    const totalOptodes = nSources + nDetectors;
+    const sourceRatio = nSources / totalOptodes;
+    
+    // Distribute optodes with interspersed pattern
+    let sourceId = 1;
+    let detectorId = 1;
+    let sourcesPlaced = 0;
+    let detectorsPlaced = 0;
+    
+    for (let i = 0; i < uniquePositions.length && (sourcesPlaced < nSources || detectorsPlaced < nDetectors); i++) {
+        const item = uniquePositions[i];
+        
+        // Use checkerboard pattern based on position in 3D space
+        // This ensures adjacent positions alternate between sources and detectors
+        const gridX = Math.floor(item.pos.x / 15); // ~15mm grid spacing
+        const gridY = Math.floor(item.pos.y / 15);
+        const gridZ = Math.floor(item.pos.z / 15);
+        const isSourceCell = (gridX + gridY + gridZ) % 2 === 0;
+        
+        // Also check if we need to balance the ratio
+        const currentSourceRatio = sourcesPlaced / Math.max(1, sourcesPlaced + detectorsPlaced);
+        const needMoreSources = currentSourceRatio < sourceRatio - 0.1;
+        const needMoreDetectors = currentSourceRatio > sourceRatio + 0.1;
+        
+        // Decide whether to place source or detector
+        let placeSource;
+        if (sourcesPlaced >= nSources) {
+            placeSource = false;
+        } else if (detectorsPlaced >= nDetectors) {
+            placeSource = true;
+        } else if (needMoreSources) {
+            placeSource = true;
+        } else if (needMoreDetectors) {
+            placeSource = false;
+        } else {
+            placeSource = isSourceCell;
+        }
+        
+        if (placeSource) {
+            sources.push({
+                id: sourceId - 1,
+                x: item.pos.x,
+                y: item.pos.y,
+                z: item.pos.z,
+                label: `S${sourceId}`,
+                gridLabel: item.pos.label
+            });
+            sourceId++;
+            sourcesPlaced++;
+        } else {
+            detectors.push({
+                id: detectorId - 1,
+                x: item.pos.x,
+                y: item.pos.y,
+                z: item.pos.z,
+                label: `D${detectorId}`,
+                gridLabel: item.pos.label
+            });
+            detectorId++;
+            detectorsPlaced++;
+        }
+    }
+    
+    console.log(`Selected ${sources.length} sources and ${detectors.length} detectors interspersed across ${regionNames.length} ROI(s)`);
+    
+    return { sources, detectors };
+}
+
+/**
+ * Distribute optodes evenly over the entire head
+ * Used when no specific ROI is selected
+ */
+function distributeOptodesEvenlyOverHead(nSources, nDetectors) {
+    const sources = [];
+    const detectors = [];
+    
+    // Use a stratified sampling approach
+    const allPositions = [...GridSystem.positions];
+    
+    // Shuffle for random distribution
+    for (let i = allPositions.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [allPositions[i], allPositions[j]] = [allPositions[j], allPositions[i]];
+    }
+    
+    // Select positions with maximum separation
+    const selected = [];
+    const minSeparation = 25;  // mm
+    
+    for (const pos of allPositions) {
+        if (selected.length >= nSources + nDetectors) break;
+        
+        // Check if far enough from existing
+        let tooClose = false;
+        for (const existing of selected) {
+            const dx = pos.x - existing.x;
+            const dy = pos.y - existing.y;
+            const dz = pos.z - existing.z;
+            const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+            if (dist < minSeparation) {
+                tooClose = true;
+                break;
+            }
+        }
+        
+        if (!tooClose) {
+            selected.push(pos);
+        }
+    }
+    
+    // Split into sources and detectors (2:1 ratio typically)
+    let sourceId = 1;
+    let detectorId = 1;
+    
+    for (let i = 0; i < selected.length; i++) {
+        const pos = selected[i];
+        
+        // Allocate more to sources (2:1 ratio)
+        const isSource = (i % 3 !== 2) && sources.length < nSources;
+        
+        if (isSource || detectors.length >= nDetectors) {
+            if (sources.length < nSources) {
+                sources.push({
+                    id: sourceId - 1,
+                    x: pos.x,
+                    y: pos.y,
+                    z: pos.z,
+                    label: `S${sourceId}`,
+                    gridLabel: pos.label
+                });
+                sourceId++;
+            }
+        } else {
+            if (detectors.length < nDetectors) {
+                detectors.push({
+                    id: detectorId - 1,
+                    x: pos.x,
+                    y: pos.y,
+                    z: pos.z,
+                    label: `D${detectorId}`,
+                    gridLabel: pos.label
+                });
+                detectorId++;
+            }
+        }
+    }
+    
+    console.log(`Distributed ${sources.length} sources and ${detectors.length} detectors evenly over head`);
+    
+    return { sources, detectors };
+}
+
+/**
+ * Get center (most representative) positions for regions
+ */
+function getCenterPositionsForRegions(regionNames) {
+    const centers = [];
+    
+    for (const region of regionNames) {
+        const positions = GridSystem.byRegion[region];
+        if (positions.length === 0) continue;
+        
+        // Find centroid
+        const centroid = {x: 0, y: 0, z: 0};
+        for (const pos of positions) {
+            centroid.x += pos.x;
+            centroid.y += pos.y;
+            centroid.z += pos.z;
+        }
+        centroid.x /= positions.length;
+        centroid.y /= positions.length;
+        centroid.z /= positions.length;
+        
+        // Find position closest to centroid
+        let nearest = positions[0];
+        let nearestDist = distance3D(centroid, nearest);
+        
+        for (const pos of positions) {
+            const dist = distance3D(centroid, pos);
+            if (dist < nearestDist) {
+                nearestDist = dist;
+                nearest = pos;
+            }
+        }
+        
+        centers.push(nearest);
+    }
+    
+    return centers;
+}
+
+// ============================================================
+// Coregistration Module
+// ============================================================
+
+/**
+ * Coregistration state and surface data
+ */
+const CoregistrationState = {
+    // Digitized fiducials from measurement (if available)
+    measuredFiducials: null,  // {nasion, lpa, rpa, inion}
+    
+    // Reference fiducials from anatomical model
+    referenceFiducials: null,
+    
+    // Transformation matrix from measured to reference space
+    transformMatrix: null,
+    
+    // Surface mesh vertices for closest-point projection
+    surfaceMesh: null,
+    
+    // Coregistration quality metrics
+    metrics: {
+        fiducialError: null,    // RMS error after fiducial alignment (mm)
+        surfaceError: null,     // RMS error after surface fitting (mm)
+        maxError: null,         // Maximum error across all optodes (mm)
+        coverage: null          // Percentage of optodes within acceptable error
+    }
+};
+
+/**
+ * Complete coregistration pipeline for optode positions
+ * Implements 3-stage process: fiducial alignment -> regression -> surface fitting
+ * 
+ * @param {Array} optodes - Array of optode positions {x, y, z}
+ * @param {Object} measuredFiducials - Digitized fiducials {nasion, lpa, rpa, inion?}
+ * @param {Object} options - Coregistration options
+ * @returns {Array} Coregistered optode positions
+ */
+function coregisterOptodes(optodes, measuredFiducials = null, options = {}) {
+    const opts = {
+        useRigidAlignment: true,
+        useRegression: true,
+        useSurfaceFitting: true,
+        maxSurfaceDistance: 10,  // mm - max distance to search for surface
+        smoothingIterations: 2,   // iterations of surface smoothing
+        ...options
+    };
+    
+    let positions = optodes.map(o => ({x: o.x, y: o.y, z: o.z}));
+    
+    // Stage 1: Fiducial-based rigid alignment
+    if (opts.useRigidAlignment && measuredFiducials) {
+        positions = applyFiducialAlignment(positions, measuredFiducials);
+        CoregistrationState.measuredFiducials = measuredFiducials;
+        console.log('Stage 1: Fiducial alignment complete');
+    }
+    
+    // Stage 2: Regression-based error correction
+    if (opts.useRegression) {
+        positions = applyRegressionCorrection(positions, measuredFiducials);
+        console.log('Stage 2: Regression correction complete');
+    }
+    
+    // Stage 3: Surface shape fitting
+    if (opts.useSurfaceFitting) {
+        positions = fitToSurfaceShape(positions, opts);
+        console.log('Stage 3: Surface fitting complete');
+    }
+    
+    // Calculate quality metrics
+    calculateCoregistrationMetrics(optodes, positions);
+    
+    return positions;
+}
+
+/**
+ * Stage 1: Rigid alignment using fiducial markers (nasion, inion, LPA, RPA)
+ * Computes optimal rotation and translation to align measured fiducials
+ * with reference anatomical fiducials
+ */
+function applyFiducialAlignment(positions, measuredFiducials) {
+    // Get reference fiducials from anatomical model
+    const refFiducials = getReferenceFiducials();
+    
+    // Extract fiducial points
+    const measuredPoints = [];
+    const referencePoints = [];
+    
+    if (measuredFiducials.nasion && refFiducials.nasion) {
+        measuredPoints.push(measuredFiducials.nasion);
+        referencePoints.push(refFiducials.nasion);
+    }
+    if (measuredFiducials.lpa && refFiducials.lpa) {
+        measuredPoints.push(measuredFiducials.lpa);
+        referencePoints.push(refFiducials.lpa);
+    }
+    if (measuredFiducials.rpa && refFiducials.rpa) {
+        measuredPoints.push(measuredFiducials.rpa);
+        referencePoints.push(refFiducials.rpa);
+    }
+    if (measuredFiducials.inion && refFiducials.inion) {
+        measuredPoints.push(measuredFiducials.inion);
+        referencePoints.push(refFiducials.inion);
+    }
+    
+    if (measuredPoints.length < 3) {
+        console.warn('Need at least 3 fiducials for rigid alignment. Using simple spherical projection.');
+        return positions.map(p => projectToHeadSurface(p));
+    }
+    
+    // Compute rigid transformation using Procrustes analysis
+    const transform = computeRigidTransform(measuredPoints, referencePoints);
+    CoregistrationState.transformMatrix = transform;
+    
+    // Calculate fiducial alignment error
+    let errorSum = 0;
+    for (let i = 0; i < measuredPoints.length; i++) {
+        const transformed = applyTransform(measuredPoints[i], transform);
+        const error = distance3D(transformed, referencePoints[i]);
+        errorSum += error * error;
+    }
+    CoregistrationState.metrics.fiducialError = Math.sqrt(errorSum / measuredPoints.length);
+    
+    console.log(`Fiducial alignment: RMS error = ${CoregistrationState.metrics.fiducialError.toFixed(2)} mm`);
+    
+    // Apply transformation to all positions
+    return positions.map(pos => applyTransform(pos, transform));
+}
+
+/**
+ * Compute rigid transformation (rotation + translation) using Procrustes analysis
+ * Minimizes sum of squared distances between corresponding points
+ */
+function computeRigidTransform(sourcePoints, targetPoints) {
+    // Compute centroids
+    const sourceCentroid = {x: 0, y: 0, z: 0};
+    const targetCentroid = {x: 0, y: 0, z: 0};
+    
+    for (let i = 0; i < sourcePoints.length; i++) {
+        sourceCentroid.x += sourcePoints[i].x;
+        sourceCentroid.y += sourcePoints[i].y;
+        sourceCentroid.z += sourcePoints[i].z;
+        targetCentroid.x += targetPoints[i].x;
+        targetCentroid.y += targetPoints[i].y;
+        targetCentroid.z += targetPoints[i].z;
+    }
+    
+    const n = sourcePoints.length;
+    sourceCentroid.x /= n; sourceCentroid.y /= n; sourceCentroid.z /= n;
+    targetCentroid.x /= n; targetCentroid.y /= n; targetCentroid.z /= n;
+    
+    // Center the points
+    const sourceCentered = sourcePoints.map(p => ({
+        x: p.x - sourceCentroid.x,
+        y: p.y - sourceCentroid.y,
+        z: p.z - sourceCentroid.z
+    }));
+    
+    const targetCentered = targetPoints.map(p => ({
+        x: p.x - targetCentroid.x,
+        y: p.y - targetCentroid.y,
+        z: p.z - targetCentroid.z
+    }));
+    
+    // Compute covariance matrix H = sum(target * source^T)
+    let H = [[0,0,0], [0,0,0], [0,0,0]];
+    for (let i = 0; i < n; i++) {
+        const s = sourceCentered[i];
+        const t = targetCentered[i];
+        H[0][0] += t.x * s.x; H[0][1] += t.x * s.y; H[0][2] += t.x * s.z;
+        H[1][0] += t.y * s.x; H[1][1] += t.y * s.y; H[1][2] += t.y * s.z;
+        H[2][0] += t.z * s.x; H[2][1] += t.z * s.y; H[2][2] += t.z * s.z;
+    }
+    
+    // Use SVD to find optimal rotation (simplified - for production use proper SVD library)
+    // For now, compute a good approximation using quaternions
+    const R = computeRotationMatrix(H);
+    
+    return {
+        rotation: R,
+        translation: {
+            x: targetCentroid.x - (R[0][0]*sourceCentroid.x + R[0][1]*sourceCentroid.y + R[0][2]*sourceCentroid.z),
+            y: targetCentroid.y - (R[1][0]*sourceCentroid.x + R[1][1]*sourceCentroid.y + R[1][2]*sourceCentroid.z),
+            z: targetCentroid.z - (R[2][0]*sourceCentroid.x + R[2][1]*sourceCentroid.y + R[2][2]*sourceCentroid.z)
+        },
+        scale: 1.0  // Rigid transformation preserves scale
+    };
+}
+
+/**
+ * Compute rotation matrix from covariance matrix (simplified Kabsch algorithm)
+ */
+function computeRotationMatrix(H) {
+    // For simplicity, if points are well-aligned, use identity + small corrections
+    // In production, this should use proper SVD
+    
+    // Compute trace and determinant
+    const trace = H[0][0] + H[1][1] + H[2][2];
+    
+    // If trace is large enough, points are already well-aligned
+    if (trace > 2.9) {
+        return [[1,0,0], [0,1,0], [0,0,1]];  // Identity matrix
+    }
+    
+    // Otherwise, compute approximate rotation using cross-covariance
+    // This is a simplified approach - full implementation would use SVD
+    const scale = Math.sqrt(trace + 1) / 2;
+    
+    return [
+        [H[0][0]/scale, H[0][1]/scale, H[0][2]/scale],
+        [H[1][0]/scale, H[1][1]/scale, H[1][2]/scale],
+        [H[2][0]/scale, H[2][1]/scale, H[2][2]/scale]
+    ];
+}
+
+/**
+ * Apply rigid transformation to a point
+ */
+function applyTransform(point, transform) {
+    const R = transform.rotation;
+    const t = transform.translation;
+    
+    return {
+        x: R[0][0]*point.x + R[0][1]*point.y + R[0][2]*point.z + t.x,
+        y: R[1][0]*point.x + R[1][1]*point.y + R[1][2]*point.z + t.y,
+        z: R[2][0]*point.x + R[2][1]*point.y + R[2][2]*point.z + t.z
+    };
+}
+
+/**
+ * Stage 2: Regression-based error correction
+ * Corrects systematic measurement errors using statistical regression
+ */
+function applyRegressionCorrection(positions, measuredFiducials) {
+    // Implement locally weighted regression (LOWESS) to smooth out measurement noise
+    // For each position, compute weighted average based on nearby points
+    
+    const corrected = [];
+    const bandwidth = 20; // mm - size of local neighborhood
+    
+    for (let i = 0; i < positions.length; i++) {
+        const pos = positions[i];
+        let weightedSum = {x: 0, y: 0, z: 0};
+        let totalWeight = 0;
+        
+        // Find nearby points and apply Gaussian weighting
+        for (let j = 0; j < positions.length; j++) {
+            const other = positions[j];
+            const dist = distance3D(pos, other);
+            
+            // Gaussian kernel weight
+            const weight = Math.exp(-(dist * dist) / (2 * bandwidth * bandwidth));
+            
+            weightedSum.x += other.x * weight;
+            weightedSum.y += other.y * weight;
+            weightedSum.z += other.z * weight;
+            totalWeight += weight;
+        }
+        
+        // Apply light correction (70% original, 30% smoothed)
+        corrected.push({
+            x: 0.7 * pos.x + 0.3 * (weightedSum.x / totalWeight),
+            y: 0.7 * pos.y + 0.3 * (weightedSum.y / totalWeight),
+            z: 0.7 * pos.z + 0.3 * (weightedSum.z / totalWeight)
+        });
+    }
+    
+    return corrected;
+}
+
+/**
+ * Stage 3: Fit positions to anatomical surface shape
+ * Projects each point to nearest point on the actual head surface mesh
+ */
+function fitToSurfaceShape(positions, options) {
+    // If we have a surface mesh loaded, project to closest points
+    if (CoregistrationState.surfaceMesh && CoregistrationState.surfaceMesh.vertices) {
+        return positions.map(pos => projectToClosestSurfacePoint(pos, options));
+    }
+    
+    // Fallback: use spherical projection with local radius estimation
+    return positions.map(pos => {
+        // Estimate local head radius based on position
+        const localRadius = estimateLocalRadius(pos);
+        return projectToHeadSurface(pos, localRadius);
+    });
+}
+
+/**
+ * Project point to closest vertex on surface mesh
+ */
+function projectToClosestSurfacePoint(point, options) {
+    const vertices = CoregistrationState.surfaceMesh.vertices;
+    let minDist = Infinity;
+    let closest = point;
+    
+    // Find closest vertex (in production, use spatial indexing for speed)
+    for (let i = 0; i < vertices.length; i += 3) {
+        const v = {x: vertices[i], y: vertices[i+1], z: vertices[i+2]};
+        const dist = distance3D(point, v);
+        
+        if (dist < minDist) {
+            minDist = dist;
+            closest = v;
+        }
+    }
+    
+    // If point is too far from surface, use interpolation
+    if (minDist > options.maxSurfaceDistance) {
+        const t = options.maxSurfaceDistance / minDist;
+        return {
+            x: point.x * (1-t) + closest.x * t,
+            y: point.y * (1-t) + closest.y * t,
+            z: point.z * (1-t) + closest.z * t
+        };
+    }
+    
+    return closest;
+}
+
+/**
+ * Estimate local head radius based on angular position
+ * Head is not perfectly spherical - radius varies by location
+ */
+function estimateLocalRadius(pos) {
+    const len = Math.sqrt(pos.x*pos.x + pos.y*pos.y + pos.z*pos.z);
+    if (len === 0) return HEAD.radius;
+    
+    // Normalized direction
+    const nx = pos.x / len;
+    const ny = pos.y / len;
+    const nz = pos.z / len;
+    
+    // Head is ellipsoidal: wider left-right, shorter front-back, taller top-bottom
+    // Approximate with ellipsoid: (x/a)^2 + (y/b)^2 + (z/c)^2 = 1
+    const a = HEAD.radius * 1.0;   // Left-right (standard)
+    const b = HEAD.radius * 0.95;  // Front-back (slightly shorter)
+    const c = HEAD.radius * 1.05;  // Top-bottom (slightly taller)
+    
+    // Compute radius along this direction
+    const denom = Math.sqrt((nx*nx)/(a*a) + (ny*ny)/(b*b) + (nz*nz)/(c*c));
+    return 1.0 / denom;
+}
+
+/**
+ * Get reference fiducials from anatomical model
+ */
+function getReferenceFiducials() {
+    if (FIDUCIALS && Object.keys(FIDUCIALS).length > 0) {
+        // Convert MNE format [x,y,z] arrays to objects
+        return {
+            nasion: FIDUCIALS.nasion ? 
+                {x: FIDUCIALS.nasion[0], y: FIDUCIALS.nasion[1], z: FIDUCIALS.nasion[2]} : null,
+            lpa: FIDUCIALS.lpa ? 
+                {x: FIDUCIALS.lpa[0], y: FIDUCIALS.lpa[1], z: FIDUCIALS.lpa[2]} : null,
+            rpa: FIDUCIALS.rpa ? 
+                {x: FIDUCIALS.rpa[0], y: FIDUCIALS.rpa[1], z: FIDUCIALS.rpa[2]} : null,
+            inion: FIDUCIALS.inion ? 
+                {x: FIDUCIALS.inion[0], y: FIDUCIALS.inion[1], z: FIDUCIALS.inion[2]} : null
+        };
+    }
+    
+    // Default fiducials based on HEAD model
+    return {
+        nasion: {x: 0, y: HEAD.nasion, z: -10},
+        lpa: {x: -HEAD.earX, y: 0, z: -15},
+        rpa: {x: HEAD.earX, y: 0, z: -15},
+        inion: {x: 0, y: HEAD.inion, z: 0}
+    };
+}
+
+/**
+ * Calculate quality metrics for coregistration
+ */
+function calculateCoregistrationMetrics(original, coregistered) {
+    let sumSquaredError = 0;
+    let maxError = 0;
+    let withinThreshold = 0;
+    const threshold = 5; // mm - acceptable error threshold
+    
+    for (let i = 0; i < original.length; i++) {
+        const error = distance3D(original[i], coregistered[i]);
+        sumSquaredError += error * error;
+        maxError = Math.max(maxError, error);
+        if (error <= threshold) withinThreshold++;
+    }
+    
+    CoregistrationState.metrics.surfaceError = Math.sqrt(sumSquaredError / original.length);
+    CoregistrationState.metrics.maxError = maxError;
+    CoregistrationState.metrics.coverage = (withinThreshold / original.length) * 100;
+    
+    console.log(`Coregistration metrics:
+  RMS surface error: ${CoregistrationState.metrics.surfaceError.toFixed(2)} mm
+  Max error: ${CoregistrationState.metrics.maxError.toFixed(2)} mm
+  Coverage: ${CoregistrationState.metrics.coverage.toFixed(1)}% within ${threshold}mm`);
+}
+
+/**
+ * Helper: 3D Euclidean distance
+ */
+function distance3D(p1, p2) {
+    const dx = p1.x - p2.x;
+    const dy = p1.y - p2.y;
+    const dz = p1.z - p2.z;
+    return Math.sqrt(dx*dx + dy*dy + dz*dz);
 }
 
 // ============================================================
@@ -655,6 +2636,7 @@ function parseElpFormat(text) {
         
         const label = parts.length > 3 ? parts[3] : null;
         
+        // Store raw positions first
         if (label && (label.startsWith('S') || label.toLowerCase().includes('source'))) {
             sources.push({ id: sourceCount++, x, y, z, label: label || `S${sourceCount}` });
         } else if (label && (label.startsWith('D') || label.toLowerCase().includes('detector'))) {
@@ -664,6 +2646,64 @@ function parseElpFormat(text) {
                 sources.push({ id: sourceCount++, x, y, z, label: `S${sourceCount}` });
             } else {
                 detectors.push({ id: detectorCount++, x, y, z, label: `D${detectorCount}` });
+            }
+        }
+    }
+    
+    // Apply grid snapping if enabled
+    const useGrid = GridSystem.config.enabled;
+    if (useGrid) {
+        // Snap sources to grid
+        for (let i = 0; i < sources.length; i++) {
+            const gridPos = snapToGrid(sources[i], { excludeOccupied: true });
+            if (gridPos) {
+                sources[i].x = gridPos.x;
+                sources[i].y = gridPos.y;
+                sources[i].z = gridPos.z;
+                sources[i].gridLabel = gridPos.label;
+                occupyGridPosition(gridPos.label);
+            } else {
+                console.warn(`Source ${sources[i].label} could not snap to grid, using coregistered position`);
+            }
+        }
+        
+        // Snap detectors to grid
+        for (let i = 0; i < detectors.length; i++) {
+            const gridPos = snapToGrid(detectors[i], { excludeOccupied: true });
+            if (gridPos) {
+                detectors[i].x = gridPos.x;
+                detectors[i].y = gridPos.y;
+                detectors[i].z = gridPos.z;
+                detectors[i].gridLabel = gridPos.label;
+                occupyGridPosition(gridPos.label);
+            } else {
+                console.warn(`Detector ${detectors[i].label} could not snap to grid, using coregistered position`);
+            }
+        }
+    } else {
+        // Apply coregistration to all optodes
+        const useCoreg = document.getElementById('use-coregistration')?.checked !== false;
+        if (useCoreg) {
+            const allOptodes = [...sources, ...detectors];
+            const coregOptions = {
+                useRigidAlignment: document.getElementById('use-fiducial-alignment')?.checked !== false,
+                useRegression: document.getElementById('use-regression')?.checked !== false,
+                useSurfaceFitting: document.getElementById('use-surface-fitting')?.checked !== false
+            };
+            
+            const coregistered = coregisterOptodes(allOptodes, null, coregOptions);
+            
+            // Update positions
+            for (let i = 0; i < sources.length; i++) {
+                sources[i].x = coregistered[i].x;
+                sources[i].y = coregistered[i].y;
+                sources[i].z = coregistered[i].z;
+            }
+            for (let i = 0; i < detectors.length; i++) {
+                const idx = sources.length + i;
+                detectors[i].x = coregistered[idx].x;
+                detectors[i].y = coregistered[idx].y;
+                detectors[i].z = coregistered[idx].z;
             }
         }
     }
@@ -679,31 +2719,18 @@ function loadExampleMontage() {
     const nSources = parseInt(DOM.nSources.value) || 32;
     const nDetectors = parseInt(DOM.nDetectors.value) || 15;
     
-    const sources = [];
-    const detectors = [];
-    
-    // Generate positions on a realistic head model
-    // Using 10-20 system-like distribution
-    
-    // Detector positions - spread across scalp
-    const detectorPositions = generateOptodeGrid(nDetectors, 'detector');
-    for (let i = 0; i < detectorPositions.length; i++) {
-        detectors.push({
-            id: i,
-            ...detectorPositions[i],
-            label: `D${i + 1}`
-        });
+    // Initialize voxel grid if not already done
+    if (!VoxelGrid.voxels || VoxelGrid.voxels.length === 0) {
+        VoxelGrid.initialize();
     }
     
-    // Source positions - interleaved with detectors
-    const sourcePositions = generateOptodeGrid(nSources, 'source');
-    for (let i = 0; i < sourcePositions.length; i++) {
-        sources.push({
-            id: i,
-            ...sourcePositions[i],
-            label: `S${i + 1}`
-        });
-    }
+    // Use grid-based selection for standardized positions
+    // Select from all regions for a full-head montage
+    const allRegions = Object.keys(BRAIN_REGIONS);
+    const result = selectGridPositionsForRegions(allRegions, nSources, nDetectors);
+    
+    const sources = result.sources;
+    const detectors = result.detectors;
     
     AppState.sources = sources;
     AppState.detectors = detectors;
@@ -936,6 +2963,12 @@ function renderTopoView(canvas, showChannels = true, showColors = true) {
     
     // Draw head outline
     drawHeadOutline(ctx, cx, cy, headRadius);
+    
+    // Draw grid points if enabled
+    const showGrid = document.getElementById('show-grid-points')?.checked !== false;
+    if (showGrid && GridSystem.positions.length > 0) {
+        drawGridPoints(ctx, cx, cy, size);
+    }
     
     if (AppState.sources.length === 0) {
         ctx.fillStyle = '#666';
@@ -1315,6 +3348,63 @@ function init3DScene(container, sceneKey) {
     controls.maxDistance = 500;
     controls.target.set(0, 0, 0);  // Orbit around head center
     
+    // Click handler for brain region selection
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+    
+    renderer.domElement.addEventListener('click', (event) => {
+        // Only handle clicks when in ROI mode or when brain parcellation is enabled
+        const isROIMode = sceneKey === 'roi';
+        const showParcellation = document.getElementById('show-brain-parcellation')?.checked || isROIMode;
+        if (!showParcellation) return;
+        if (!BRAIN_SURFACE.mesh) return;
+        
+        // Calculate mouse position in normalized device coordinates (-1 to +1)
+        const rect = renderer.domElement.getBoundingClientRect();
+        mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+        
+        // Update raycaster
+        raycaster.setFromCamera(mouse, camera);
+        
+        // Check intersection with brain surface
+        const intersects = raycaster.intersectObject(BRAIN_SURFACE.mesh, false);
+        
+        if (intersects.length > 0) {
+            // Get the clicked face
+            const faceIndex = intersects[0].faceIndex;
+            if (faceIndex !== undefined) {
+                // Get vertices of the face
+                const face = BRAIN_SURFACE.faces[faceIndex];
+                if (face) {
+                    // Get region from first vertex of face
+                    const vertexIndex = face[0];
+                    const vertex = BRAIN_SURFACE.vertices[vertexIndex];
+                    const regionName = vertex.region;
+                    
+                    // Toggle region selection
+                    if (BRAIN_SURFACE.selectedRegions.has(regionName)) {
+                        BRAIN_SURFACE.selectedRegions.delete(regionName);
+                        console.log(`Deselected region: ${regionName}`);
+                    } else {
+                        BRAIN_SURFACE.selectedRegions.add(regionName);
+                        console.log(`Selected region: ${regionName}`);
+                    }
+                    
+                    // Update ROI state to sync with brain surface selection
+                    ROIState.selectedRegions = new Set(BRAIN_SURFACE.selectedRegions);
+                    
+                    // Update visualization
+                    colorBrainByParcellation();
+                    update3DOptodes(sceneKey, true);
+                    
+                    // Update UI display
+                    updateSelectedROIsDisplay();
+                }
+            }
+        }
+    });
+    
     // Lighting - bright ambient + multiple directional for good visibility
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
     scene.add(ambientLight);
@@ -1484,77 +3574,244 @@ function update3DOptodes(sceneKey, showColors = true) {
     // MNE-NIRS visualization style:
     // fnirs=["channels", "pairs", "sources", "detectors"]
     
-    // 1. Add PAIRS (white lines connecting sources to detectors)
-    for (const channel of AppState.channels) {
-        const source = AppState.sources.find(s => s.id === channel.sourceId);
-        const detector = AppState.detectors.find(d => d.id === channel.detectorId);
-        
-        if (source && detector) {
+    // 1. Add PHOTON MIGRATION PATHS (banana-shaped light trajectories through tissue)
+    const showPhotonPaths = document.getElementById('show-photon-paths')?.checked !== false;
+    const pathOpacityScale = parseFloat(document.getElementById('path-opacity')?.value || 60) / 100;
+    
+    if (showPhotonPaths) {
+        for (const channel of AppState.channels) {
+            const source = AppState.sources.find(s => s.id === channel.sourceId);
+            const detector = AppState.detectors.find(d => d.id === channel.detectorId);
+            
+            if (source && detector) {
             const slot = AppState.coloring[source.id] || 0;
             
-            // Pair line color - white by default (MNE style), colored when time slot assigned
-            let lineColor;
-            if (showColors && slot > 0) {
-                lineColor = new THREE.Color(getSlotColor(slot));
-            } else {
-                lineColor = new THREE.Color(0xffffff);  // White pairs (MNE style)
+            // Calculate photon migration path (banana shape)
+            const wavelength = 850; // nm (could be channel-specific)
+            const pathData = calculatePhotonMigrationPath(source, detector, {
+                wavelength: wavelength,
+                nPoints: 30
+            });
+            
+            // Store sensitivity profile for source reconstruction
+            channel.photonPath = pathData;
+            
+            // Calculate voxel-wise sensitivity for this channel
+            if (VoxelGrid.voxels && VoxelGrid.voxels.length > 0) {
+                channel.voxelSensitivity = calculateVoxelSensitivity(pathData, channel.id);
             }
             
-            const points = [
-                new THREE.Vector3(source.x, source.y, source.z),
-                new THREE.Vector3(detector.x, detector.y, detector.z)
-            ];
+            // Color based on slot assignment or default
+            let pathColor;
+            if (showColors && slot > 0) {
+                pathColor = new THREE.Color(getSlotColor(slot));
+            } else {
+                pathColor = new THREE.Color(0xff6b35);  // Orange-red for light path
+            }
             
-            const lineGeometry = new THREE.BufferGeometry().setFromPoints(points);
-            const lineMaterial = new THREE.LineBasicMaterial({ 
-                color: lineColor,
-                opacity: showColors && slot > 0 ? 0.9 : 0.6,
-                transparent: true
+            // Create smooth curve from path points
+            const curve = new THREE.CatmullRomCurve3(pathData.pathPoints);
+            
+            // Banana-shaped photon density: Variable radius along path
+            // Narrow at source (3mm fiber) → Wide in middle (diffuse cloud) → Narrow at detector (1mm fiber)
+            const radialSegments = 16;
+            const tubularSegments = 30;
+            
+            // Create custom tube geometry with variable radius
+            const path = curve;
+            const frames = path.computeFrenetFrames(tubularSegments, false);
+            
+            const vertices = [];
+            const normals = [];
+            const uvs = [];
+            
+            for (let i = 0; i <= tubularSegments; i++) {
+                const u = i / tubularSegments;
+                const point = path.getPointAt(u);
+                const normal = frames.normals[i];
+                const binormal = frames.binormals[i];
+                
+                // Variable radius: banana profile
+                // Narrow at ends (fiber tips), wide in middle (photon spread)
+                const distFromMid = Math.abs(u - 0.5) * 2;  // 0 at middle, 1 at ends
+                
+                // Radius profile: starts at 1.5mm (source fiber)
+                //                 expands to 8mm at middle
+                //                 tapers to 0.5mm (detector fiber)
+                let radius;
+                if (u < 0.5) {
+                    // Source to middle: 1.5mm → 8mm
+                    const t = u / 0.5;  // 0 to 1
+                    // Smooth expansion: quadratic easing
+                    const expansion = Math.sin(t * Math.PI / 2);  // 0 to 1, smooth
+                    radius = 1.5 + (8.0 - 1.5) * expansion;
+                } else {
+                    // Middle to detector: 8mm → 0.5mm
+                    const t = (u - 0.5) / 0.5;  // 0 to 1
+                    // Smooth contraction: quadratic easing
+                    const contraction = Math.cos(t * Math.PI / 2);  // 1 to 0, smooth
+                    radius = 0.5 + (8.0 - 0.5) * contraction;
+                }
+                
+                // Create ring of vertices at this point
+                for (let j = 0; j <= radialSegments; j++) {
+                    const v = j / radialSegments * Math.PI * 2;
+                    
+                    const cx = -radius * Math.cos(v);
+                    const cy = radius * Math.sin(v);
+                    
+                    const pos = point.clone();
+                    pos.add(normal.clone().multiplyScalar(cx));
+                    pos.add(binormal.clone().multiplyScalar(cy));
+                    
+                    vertices.push(pos.x, pos.y, pos.z);
+                    
+                    const norm = normal.clone().multiplyScalar(Math.cos(v))
+                        .add(binormal.clone().multiplyScalar(Math.sin(v)));
+                    normals.push(norm.x, norm.y, norm.z);
+                    
+                    uvs.push(u, v / (Math.PI * 2));
+                }
+            }
+            
+            // Create faces
+            const indices = [];
+            for (let i = 0; i < tubularSegments; i++) {
+                for (let j = 0; j < radialSegments; j++) {
+                    const a = i * (radialSegments + 1) + j;
+                    const b = a + radialSegments + 1;
+                    const c = a + radialSegments + 2;
+                    const d = a + 1;
+                    
+                    indices.push(a, b, d);
+                    indices.push(b, c, d);
+                }
+            }
+            
+            const tubeGeometry = new THREE.BufferGeometry();
+            tubeGeometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            tubeGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+            tubeGeometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+            tubeGeometry.setIndex(indices);
+            
+            // Custom shader material for radial transparency gradient
+            // Shows photon density: highest in center, lowest at edges
+            const baseOpacity = showColors && slot > 0 ? 0.8 : 0.6;
+            const tubeMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    color: { value: pathColor },
+                    maxOpacity: { value: baseOpacity * pathOpacityScale },
+                    minOpacity: { value: 0.0 }  // Fully transparent at edges
+                },
+                vertexShader: `
+                    varying vec2 vUv;
+                    varying vec3 vNormal;
+                    varying vec3 vViewPosition;
+                    
+                    void main() {
+                        vUv = uv;
+                        vNormal = normalize(normalMatrix * normal);
+                        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+                        vViewPosition = -mvPosition.xyz;
+                        gl_Position = projectionMatrix * mvPosition;
+                    }
+                `,
+                fragmentShader: `
+                    uniform vec3 color;
+                    uniform float maxOpacity;
+                    uniform float minOpacity;
+                    
+                    varying vec2 vUv;
+                    varying vec3 vNormal;
+                    varying vec3 vViewPosition;
+                    
+                    void main() {
+                        // vUv.x goes along tube (0 to 1)
+                        // vUv.y goes around tube (0 to 1)
+                        
+                        // Calculate radial distance from center of tube
+                        // vUv.y = 0.5 is center, 0.0 and 1.0 are edges
+                        float radialDist = abs(vUv.y - 0.5) * 2.0;  // 0 at center, 1 at edge
+                        
+                        // Gaussian-like falloff for photon density
+                        // Dense in center, diffuse at edges
+                        float densityFalloff = exp(-3.0 * radialDist * radialDist);
+                        float alpha = mix(minOpacity, maxOpacity, densityFalloff);
+                        
+                        // Lighting (simple Lambert)
+                        vec3 viewDir = normalize(vViewPosition);
+                        float lightIntensity = abs(dot(vNormal, viewDir));
+                        lightIntensity = 0.4 + 0.6 * lightIntensity;  // Ambient + diffuse
+                        
+                        vec3 finalColor = color * lightIntensity;
+                        
+                        // Add slight emissive glow in center
+                        float centerGlow = 1.0 - radialDist;
+                        finalColor += color * 0.2 * centerGlow;
+                        
+                        gl_FragColor = vec4(finalColor, alpha);
+                    }
+                `,
+                transparent: true,
+                side: THREE.DoubleSide,
+                depthWrite: false  // Important for transparency sorting
             });
-            const line = new THREE.Line(lineGeometry, lineMaterial);
-            scene.add(line);
-            optodeObjects.push(line);
             
-            // 2. Add CHANNEL marker (orange dot at midpoint - MNE style)
-            const midX = (source.x + detector.x) / 2;
-            const midY = (source.y + detector.y) / 2;
-            const midZ = (source.z + detector.z) / 2;
-            
-            const midGeometry = new THREE.SphereGeometry(2.5, 12, 12);
-            const midMaterial = new THREE.MeshBasicMaterial({ 
-                color: showColors && slot > 0 ? lineColor : 0xff8c00  // Orange (MNE style)
-            });
-            const midpoint = new THREE.Mesh(midGeometry, midMaterial);
-            midpoint.position.set(midX, midY, midZ);
-            midpoint.userData = { 
-                type: 'channel', 
+            const tube = new THREE.Mesh(tubeGeometry, tubeMaterial);
+            tube.userData = {
+                type: 'photon_path',
                 sourceId: source.id, 
                 detectorId: detector.id,
-                distance: channel.distance
+                distance: channel.distance,
+                penetrationDepth: pathData.penetrationDepth,
+                wavelength: wavelength
             };
-            scene.add(midpoint);
-            optodeObjects.push(midpoint);
+            scene.add(tube);
+            optodeObjects.push(tube);
+            
+            // Optional: Add surface connection line (thin, subtle)
+            const surfaceLineGeometry = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(source.x, source.y, source.z),
+                new THREE.Vector3(detector.x, detector.y, detector.z)
+            ]);
+            const surfaceLineMaterial = new THREE.LineBasicMaterial({
+                color: 0xffffff,
+                transparent: true,
+                opacity: 0.15 * pathOpacityScale
+            });
+            const surfaceLine = new THREE.Line(surfaceLineGeometry, surfaceLineMaterial);
+            scene.add(surfaceLine);
+            optodeObjects.push(surfaceLine);
+            }
         }
     }
     
-    // 3. Add DETECTORS (black dots - MNE style)
+    // 3. Add DETECTORS (fiber optic tips - 1mm diameter)
     for (const det of AppState.detectors) {
-        // Use sphere for consistency with MNE (which shows "black dots")
-        const geometry = new THREE.SphereGeometry(5, 16, 16);
+        // Fiber optic detector tip: Small cylinder (1mm diameter)
+        const fiberRadius = 0.5;  // 0.5mm radius = 1mm diameter
+        const fiberLength = 2;    // 2mm length visible
+        
+        const geometry = new THREE.CylinderGeometry(fiberRadius, fiberRadius, fiberLength, 8);
         const material = new THREE.MeshPhongMaterial({ 
-            color: 0x111111,  // Black (MNE style)
-            emissive: 0x111111,
+            color: 0x111111,  // Black fiber
+            emissive: 0x222222,
             shininess: 30
         });
         const mesh = new THREE.Mesh(geometry, material);
         mesh.position.set(det.x, det.y, det.z);
+        
+        // Orient fiber perpendicular to head surface (pointing inward slightly)
+        const orientation = getPuckOrientation(det);
+        mesh.quaternion.copy(orientation);
+        
         mesh.userData = { type: 'detector', id: det.id, label: det.label };
         
         scene.add(mesh);
         optodeObjects.push(mesh);
     }
     
-    // 4. Add SOURCES (red dots - MNE style, or colored by time slot)
+    // 4. Add SOURCES (fiber optic tips - 3mm diameter, with glow)
     for (const src of AppState.sources) {
         const slot = AppState.coloring[src.id] || 0;
         
@@ -1562,18 +3819,26 @@ function update3DOptodes(sceneKey, showColors = true) {
         if (showColors && slot > 0) {
             sourceColor = new THREE.Color(getSlotColor(slot));
         } else {
-            sourceColor = new THREE.Color(0xff0000);  // Red (MNE style for sources)
+            sourceColor = new THREE.Color(0xff0000);  // Red default for LED
         }
         
-        // Create source sphere (slightly larger than detector for distinction)
-        const geometry = new THREE.SphereGeometry(6, 24, 24);
+        // Fiber optic source tip: Larger cylinder (3mm diameter)
+        const fiberRadius = 1.5;  // 1.5mm radius = 3mm diameter
+        const fiberLength = 2;    // 2mm length visible
+        
+        const geometry = new THREE.CylinderGeometry(fiberRadius, fiberRadius, fiberLength, 12);
         const material = new THREE.MeshPhongMaterial({ 
             color: sourceColor,
-            emissive: sourceColor.clone().multiplyScalar(0.15),
-            shininess: 50
+            emissive: sourceColor.clone().multiplyScalar(0.4),  // Glowing LED
+            shininess: 60
         });
         const mesh = new THREE.Mesh(geometry, material);
         mesh.position.set(src.x, src.y, src.z);
+        
+        // Orient fiber perpendicular to head surface
+        const orientation = getPuckOrientation(src);
+        mesh.quaternion.copy(orientation);
+        
         mesh.userData = { type: 'source', id: src.id, label: src.label, slot };
         
         scene.add(mesh);
@@ -1592,6 +3857,582 @@ function update3DOptodes(sceneKey, showColors = true) {
             optodeObjects.push(sprite);
         }
     }
+    
+    // 5. Add GEODESIC GRID (complete latitude/longitude mesh)
+    const showGeodesicIn3D = document.getElementById('show-geodesic-grid')?.checked !== false;
+    
+    if (showGeodesicIn3D && GridSystem.geodesicGrid && GridSystem.geodesicGrid.length > 0) {
+        // Draw tiny markers at each grid point
+        for (const gridPoint of GridSystem.geodesicGrid) {
+            const geometry = createPuckGeometry(0.8, 0.3);  // Tiny markers
+            const material = new THREE.MeshBasicMaterial({ 
+                color: 0x4a5568,
+                transparent: true,
+                opacity: 0.15
+            });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.position.set(gridPoint.x, gridPoint.y, gridPoint.z);
+            
+            const orientation = getPuckOrientation(gridPoint);
+            mesh.quaternion.copy(orientation);
+            
+            mesh.userData = { type: 'geodesic-grid' };
+            
+            scene.add(mesh);
+            optodeObjects.push(mesh);
+        }
+        
+        // Draw latitude lines (constant phi)
+        const lineMaterial = new THREE.LineBasicMaterial({ 
+            color: 0x4a5568,
+            transparent: true,
+            opacity: 0.15
+        });
+        
+        const phiValues = [...new Set(GridSystem.geodesicGrid.map(p => Math.round(p.phi * 1000) / 1000))];
+        for (const phi of phiValues) {
+            const pointsAtPhi = GridSystem.geodesicGrid
+                .filter(p => Math.abs(p.phi - phi) < 0.001)
+                .sort((a, b) => a.theta - b.theta);
+            
+            if (pointsAtPhi.length > 2) {
+                const points = pointsAtPhi.map(p => new THREE.Vector3(p.x, p.y, p.z));
+                points.push(points[0].clone()); // Close the loop
+                
+                const lineGeometry = new THREE.BufferGeometry().setFromPoints(points);
+                const line = new THREE.Line(lineGeometry, lineMaterial);
+                scene.add(line);
+                optodeObjects.push(line);
+            }
+        }
+    }
+    
+    // 6. Add STANDARD GRID POSITIONS (10-20/10-10/10-5 highlighted positions)
+    const showStandardGrid = document.getElementById('show-grid-points')?.checked !== false;
+    const gridDensity = document.getElementById('grid-density')?.value || 'all';
+    
+    if (showStandardGrid && GridSystem.positions && GridSystem.positions.length > 0) {
+        for (const gridPoint of GridSystem.positions) {
+            // Skip occupied positions
+            if (GridSystem.occupied.has(gridPoint.label)) continue;
+            
+            // Get density classification
+            const density = classifyElectrodeDensity(gridPoint.label);
+            
+            // Filter by density setting
+            if (gridDensity === '10-20' && density !== '10-20') continue;
+            if (gridDensity === '10-10' && density === '10-5') continue;
+            if (gridDensity === 'none') continue;
+            
+            // Hierarchical sizing
+            let radius, height, alpha;
+            if (density === '10-20') {
+                radius = 4;
+                height = 1.5;
+                alpha = 0.6;
+            } else if (density === '10-10') {
+                radius = 3;
+                height = 1;
+                alpha = 0.4;
+            } else { // 10-5
+                radius = 2;
+                height = 0.8;
+                alpha = 0.25;
+            }
+            
+            // Create grid marker puck (highlighted in blue)
+            const geometry = createPuckGeometry(radius, height);
+            const material = new THREE.MeshPhongMaterial({ 
+                color: 0x2e7bc4,  // Brighter blue for standard positions
+                transparent: true,
+                opacity: alpha,
+                shininess: 20,
+                flatShading: false
+            });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.position.set(gridPoint.x, gridPoint.y, gridPoint.z);
+            
+            // Orient puck to be tangent to head surface
+            const orientation = getPuckOrientation(gridPoint);
+            mesh.quaternion.copy(orientation);
+            
+            mesh.userData = { 
+                type: 'grid',
+                label: gridPoint.label,
+                density: density
+            };
+            
+            scene.add(mesh);
+            optodeObjects.push(mesh);
+        }
+    }
+    
+    // 7. Add brain surface visualization
+    const showBrainSurface = document.getElementById('show-voxels')?.checked === true;
+    // Always show brain parcellation in ROI mode, otherwise check the checkbox
+    const isROIMode = sceneKey === 'roi';
+    const showBrainParcellation = isROIMode || (document.getElementById('show-brain-parcellation')?.checked === true);
+    const voxelThreshold = parseFloat(document.getElementById('voxel-threshold')?.value || 20) / 100;
+    const voxelBrightness = parseFloat(document.getElementById('voxel-brightness')?.value || 100) / 100;
+    
+    // Show parcellation for ROI selection
+    if (showBrainParcellation) {
+        if (!BRAIN_SURFACE.mesh) {
+            if (!BRAIN_SURFACE.vertices || BRAIN_SURFACE.vertices.length === 0) {
+                generateBrainSurface();
+            }
+            colorBrainByParcellation();
+        }
+        
+        if (BRAIN_SURFACE.mesh && !scene.children.includes(BRAIN_SURFACE.mesh)) {
+            scene.add(BRAIN_SURFACE.mesh);
+            optodeObjects.push(BRAIN_SURFACE.mesh);
+        }
+        
+        // Update colors if selection changed
+        colorBrainByParcellation();
+    }
+    
+    // Show sensitivity overlay (if montage exists)
+    if (showBrainSurface && FsAverageModel.brainMesh && AppState.channels.length > 0) {
+        // Auto-build sensitivity matrix if not yet built
+        if (!VoxelGrid.sensitivityMatrix) {
+            console.log('Auto-building sensitivity matrix...');
+            buildSensitivityMatrix();
+        }
+        
+        if (VoxelGrid.sensitivityMatrix) {
+            // Color the existing brain mesh vertices
+            colorExistingBrainMesh(FsAverageModel.brainMesh, voxelThreshold, voxelBrightness);
+        }
+    }
+}
+
+/**
+ * Color brain surface by parcellation regions
+ * Shows anatomical regions in different colors for ROI selection
+ */
+function colorBrainByParcellation() {
+    if (!BRAIN_SURFACE.vertices || BRAIN_SURFACE.vertices.length === 0) {
+        generateBrainSurface();
+    }
+    
+    // Region colors (matching BRAIN_REGIONS)
+    const regionColors = {
+        'Left Frontal': { r: 0.91, g: 0.30, b: 0.24 },    // Red
+        'Right Frontal': { r: 0.91, g: 0.30, b: 0.24 },
+        'Left Parietal': { r: 0.20, g: 0.60, b: 0.86 },   // Blue
+        'Right Parietal': { r: 0.20, g: 0.60, b: 0.86 },
+        'Left Temporal': { r: 0.95, g: 0.61, b: 0.07 },   // Orange
+        'Right Temporal': { r: 0.95, g: 0.61, b: 0.07 },
+        'Left Occipital': { r: 0.61, g: 0.35, b: 0.71 },  // Purple
+        'Right Occipital': { r: 0.61, g: 0.35, b: 0.71 }
+    };
+    
+    // Create geometry
+    const positions = [];
+    const colors = [];
+    const indices = [];
+    
+    for (const vertex of BRAIN_SURFACE.vertices) {
+        positions.push(vertex.x, vertex.y, vertex.z);
+        
+        const regionColor = regionColors[vertex.region] || { r: 0.8, g: 0.8, b: 0.8 };
+        
+        // If region is selected, make it brighter
+        if (BRAIN_SURFACE.selectedRegions.has(vertex.region)) {
+            colors.push(
+                Math.min(1.0, regionColor.r * 1.3),
+                Math.min(1.0, regionColor.g * 1.3),
+                Math.min(1.0, regionColor.b * 1.3)
+            );
+        } else {
+            // Slightly desaturated when not selected
+            colors.push(
+                regionColor.r * 0.7 + 0.2,
+                regionColor.g * 0.7 + 0.2,
+                regionColor.b * 0.7 + 0.2
+            );
+        }
+    }
+    
+    for (const face of BRAIN_SURFACE.faces) {
+        indices.push(face[0], face[1], face[2]);
+    }
+    
+    // Create or update mesh
+    if (BRAIN_SURFACE.mesh) {
+        // Update existing mesh
+        const geometry = BRAIN_SURFACE.mesh.geometry;
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+        geometry.setIndex(indices);
+        geometry.computeVertexNormals();
+        geometry.attributes.position.needsUpdate = true;
+        geometry.attributes.color.needsUpdate = true;
+    } else {
+        // Create new mesh
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+        geometry.setIndex(indices);
+        geometry.computeVertexNormals();
+        
+        const material = new THREE.MeshPhongMaterial({
+            vertexColors: true,
+            side: THREE.DoubleSide,
+            shininess: 30,
+            flatShading: false
+        });
+        
+        BRAIN_SURFACE.mesh = new THREE.Mesh(geometry, material);
+        BRAIN_SURFACE.mesh.userData = { type: 'brain_surface_parcellation' };
+    }
+    
+    console.log('Brain colored by parcellation');
+}
+
+/**
+ * Color the existing brain mesh based on sensitivity
+ * Modifies vertex colors of the loaded brain surface in place
+ */
+function colorExistingBrainMesh(brainMesh, threshold, brightness) {
+    if (!brainMesh || !brainMesh.geometry) {
+        console.warn('Brain mesh not available for coloring');
+        return;
+    }
+    
+    const geometry = brainMesh.geometry;
+    const positionAttr = geometry.attributes.position;
+    
+    if (!positionAttr) {
+        console.warn('Brain mesh has no position attribute');
+        return;
+    }
+    
+    const vertexCount = positionAttr.count;
+    
+    // Get voxel selection parameters
+    const selectionMode = document.getElementById('voxel-selection-mode')?.value || 'moderate';
+    const minChannels = parseInt(document.getElementById('voxel-min-channels')?.value || 2);
+    const minWeightPct = parseFloat(document.getElementById('voxel-min-weight')?.value || 5);
+    
+    // Find maximum sensitivity for normalization
+    let maxVoxelSensitivity = 0;
+    for (const voxel of VoxelGrid.voxels) {
+        if (voxel.isInsideHead && voxel.totalSensitivity > maxVoxelSensitivity) {
+            maxVoxelSensitivity = voxel.totalSensitivity;
+        }
+    }
+    
+    // Prepare filter parameters
+    const filterParams = {
+        mode: selectionMode,
+        minChannels: minChannels,
+        minWeightPct: minWeightPct,
+        maxSensitivity: maxVoxelSensitivity
+    };
+    
+    // Project sensitivity onto each vertex
+    const vertexSensitivities = new Float32Array(vertexCount);
+    let maxSensitivity = 0;
+    
+    for (let i = 0; i < vertexCount; i++) {
+        const x = positionAttr.getX(i);
+        const y = positionAttr.getY(i);
+        const z = positionAttr.getZ(i);
+        
+        // Find nearby voxels and interpolate sensitivity
+        let totalSensitivity = 0;
+        let totalWeight = 0;
+        const searchRadius = 10;  // mm
+        
+        for (const voxel of VoxelGrid.voxels) {
+            // Apply new filtering criteria
+            if (!shouldShowVoxel(voxel, filterParams)) continue;
+            if (voxel.totalSensitivity === 0) continue;
+            
+            const dx = voxel.x - x;
+            const dy = voxel.y - y;
+            const dz = voxel.z - z;
+            const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+            
+            if (dist < searchRadius) {
+                const weight = 1.0 / (dist + 1.0);
+                totalSensitivity += voxel.totalSensitivity * weight;
+                totalWeight += weight;
+            }
+        }
+        
+        if (totalWeight > 0) {
+            vertexSensitivities[i] = totalSensitivity / totalWeight;
+            maxSensitivity = Math.max(maxSensitivity, vertexSensitivities[i]);
+        } else {
+            vertexSensitivities[i] = 0;
+        }
+    }
+    
+    if (maxSensitivity === 0) {
+        console.warn('No sensitivity projected onto brain surface');
+        return;
+    }
+    
+    const thresholdValue = maxSensitivity * threshold;
+    
+    // Create color attribute
+    const colors = new Float32Array(vertexCount * 3);
+    
+    for (let i = 0; i < vertexCount; i++) {
+        const sensitivity = vertexSensitivities[i];
+        const normSens = sensitivity / maxSensitivity;
+        
+        if (sensitivity < thresholdValue || sensitivity === 0) {
+            // Below threshold or no data: keep original brain color (pinkish-gray)
+            colors[i * 3 + 0] = 0.91;  // R
+            colors[i * 3 + 1] = 0.82;  // G
+            colors[i * 3 + 2] = 0.78;  // B
+        } else {
+            // Above threshold: heat map (blue -> cyan -> yellow -> red)
+            const gamma = 1.5;
+            const scaledSens = Math.pow(normSens, 1 / gamma) * brightness;
+            const displaySens = Math.min(1.0, scaledSens);
+            
+            let r, g, b;
+            if (displaySens < 0.33) {
+                // Blue to cyan
+                const t = displaySens / 0.33;
+                r = 0;
+                g = t;
+                b = 1;
+            } else if (displaySens < 0.67) {
+                // Cyan to yellow
+                const t = (displaySens - 0.33) / 0.34;
+                r = t;
+                g = 1;
+                b = 1 - t;
+            } else {
+                // Yellow to red
+                const t = (displaySens - 0.67) / 0.33;
+                r = 1;
+                g = 1 - t;
+                b = 0;
+            }
+            
+            colors[i * 3 + 0] = r;
+            colors[i * 3 + 1] = g;
+            colors[i * 3 + 2] = b;
+        }
+    }
+    
+    // Update or create color attribute
+    if (geometry.attributes.color) {
+        geometry.attributes.color.array = colors;
+        geometry.attributes.color.needsUpdate = true;
+    } else {
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    }
+    
+    // Update material to use vertex colors
+    if (!brainMesh.material.vertexColors) {
+        brainMesh.material = new THREE.MeshPhongMaterial({
+            vertexColors: true,
+            side: THREE.DoubleSide,
+            shininess: 30,
+            flatShading: false
+        });
+    }
+    
+    brainMesh.material.needsUpdate = true;
+    geometry.computeVertexNormals();
+    
+    console.log(`Colored ${vertexCount} vertices on brain surface`);
+}
+
+// Keep old voxel visualization as fallback (not used by default)
+/**
+ * Determine if a voxel should be displayed based on selection criteria
+ * @param {Object} voxel - Voxel object with sensitivity data
+ * @param {Object} params - Filter parameters
+ * @returns {boolean} True if voxel should be shown
+ */
+function shouldShowVoxel(voxel, params) {
+    const { mode, minChannels, minWeightPct, maxSensitivity } = params;
+    
+    if (!voxel.isInsideHead) return false;
+    
+    // Count channels contributing to this voxel
+    const channelCount = Object.keys(voxel.sensitivity || {}).length;
+    
+    // Get normalized weighted sum
+    const normalizedSens = maxSensitivity > 0 ? voxel.totalSensitivity / maxSensitivity : 0;
+    
+    // Apply criteria based on mode
+    switch (mode) {
+        case 'lenient':
+            // Show any voxel with any light penetration (any channel contribution)
+            return channelCount > 0 && voxel.totalSensitivity > 1e-9;
+        
+        case 'moderate':
+            // Show voxels with either: 2+ channels OR moderate sensitivity (>10% of max)
+            return (channelCount >= 2) || (normalizedSens > 0.1);
+        
+        case 'strict':
+            // Show voxels with many channels (3+) AND high sensitivity (>20% of max)
+            return (channelCount >= 3) && (normalizedSens > 0.2);
+        
+        case 'custom':
+            // Use user-specified thresholds
+            const meetsChannelReq = channelCount >= minChannels;
+            const meetsWeightReq = normalizedSens >= (minWeightPct / 100);
+            return meetsChannelReq && meetsWeightReq;
+        
+        default:
+            return false;
+    }
+}
+
+function addVoxelCubes(scene, optodeObjects, voxelThreshold, voxelBrightness) {
+    if (VoxelGrid.voxels && VoxelGrid.voxels.length > 0 && VoxelGrid.sensitivityMatrix) {
+        // Get voxel selection parameters
+        const selectionMode = document.getElementById('voxel-selection-mode')?.value || 'moderate';
+        const minChannels = parseInt(document.getElementById('voxel-min-channels')?.value || 2);
+        const minWeightPct = parseFloat(document.getElementById('voxel-min-weight')?.value || 5);
+        
+        // Find maximum sensitivity for normalization
+        let maxSensitivity = 0;
+        for (const voxel of VoxelGrid.voxels) {
+            if (voxel.isInsideHead && voxel.totalSensitivity > maxSensitivity) {
+                maxSensitivity = voxel.totalSensitivity;
+            }
+        }
+        
+        if (maxSensitivity > 0) {
+            // Prepare filter parameters
+            const filterParams = {
+                mode: selectionMode,
+                minChannels: minChannels,
+                minWeightPct: minWeightPct,
+                maxSensitivity: maxSensitivity
+            };
+            
+            // Also apply legacy threshold for additional filtering if needed
+            const legacyThreshold = maxSensitivity * voxelThreshold;
+            
+            for (const voxel of VoxelGrid.voxels) {
+                // Use new filtering criteria
+                if (!shouldShowVoxel(voxel, filterParams)) continue;
+                
+                // Optional: also check legacy threshold (for backward compatibility)
+                // Comment out this line to use only new filtering
+                if (voxel.totalSensitivity < legacyThreshold) continue;
+                
+                // Normalize sensitivity (0 to 1)
+                const normSens = voxel.totalSensitivity / maxSensitivity;
+                
+                // Apply brightness scaling with gamma correction for better dynamic range
+                const gamma = 1.5;  // Increase contrast
+                const scaledSens = Math.pow(normSens, 1 / gamma) * voxelBrightness;
+                const displaySens = Math.min(1.0, scaledSens);
+                
+                // Color gradient: blue (low) -> cyan -> yellow -> red (high)
+                let color;
+                if (displaySens < 0.33) {
+                    // Blue to cyan
+                    const t = displaySens / 0.33;
+                    color = new THREE.Color(0, t, 1);
+                } else if (displaySens < 0.67) {
+                    // Cyan to yellow
+                    const t = (displaySens - 0.33) / 0.34;
+                    color = new THREE.Color(t, 1, 1 - t);
+                } else {
+                    // Yellow to red
+                    const t = (displaySens - 0.67) / 0.33;
+                    color = new THREE.Color(1, 1 - t, 0);
+                }
+                
+                // Small cube at voxel center
+                const voxelSize = VoxelGrid.resolution * 0.8;
+                const geometry = new THREE.BoxGeometry(voxelSize, voxelSize, voxelSize);
+                
+                // Base opacity + sensitivity-weighted boost, scaled by brightness
+                const baseOpacity = 0.3 * voxelBrightness;
+                const sensOpacity = 0.5 * displaySens;
+                const finalOpacity = Math.min(0.9, baseOpacity + sensOpacity);
+                
+                const material = new THREE.MeshPhongMaterial({
+                    color: color,
+                    transparent: true,
+                    opacity: finalOpacity,
+                    shininess: 10,
+                    emissive: color.clone().multiplyScalar(0.2 * displaySens)  // Subtle glow for high sensitivity
+                });
+                
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.position.set(voxel.x, voxel.y, voxel.z);
+                mesh.userData = {
+                    type: 'voxel',
+                    voxelId: voxel.id,
+                    sensitivity: voxel.totalSensitivity,
+                    normSensitivity: normSens
+                };
+                
+                scene.add(mesh);
+                optodeObjects.push(mesh);
+            }
+        }
+    }
+}
+
+/**
+ * Update voxel statistics display based on current filter settings
+ */
+function updateVoxelStats() {
+    if (!VoxelGrid.voxels || VoxelGrid.voxels.length === 0) {
+        return;
+    }
+    
+    // Get voxel selection parameters
+    const selectionMode = document.getElementById('voxel-selection-mode')?.value || 'moderate';
+    const minChannels = parseInt(document.getElementById('voxel-min-channels')?.value || 2);
+    const minWeightPct = parseFloat(document.getElementById('voxel-min-weight')?.value || 5);
+    
+    // Find maximum sensitivity
+    let maxSensitivity = 0;
+    for (const voxel of VoxelGrid.voxels) {
+        if (voxel.isInsideHead && voxel.totalSensitivity > maxSensitivity) {
+            maxSensitivity = voxel.totalSensitivity;
+        }
+    }
+    
+    // Prepare filter parameters
+    const filterParams = {
+        mode: selectionMode,
+        minChannels: minChannels,
+        minWeightPct: minWeightPct,
+        maxSensitivity: maxSensitivity
+    };
+    
+    // Count shown voxels and compute statistics
+    let shownCount = 0;
+    let totalChannelCount = 0;
+    
+    for (const voxel of VoxelGrid.voxels) {
+        if (shouldShowVoxel(voxel, filterParams)) {
+            shownCount++;
+            const channelCount = Object.keys(voxel.sensitivity || {}).length;
+            totalChannelCount += channelCount;
+        }
+    }
+    
+    const avgChannels = shownCount > 0 ? (totalChannelCount / shownCount).toFixed(1) : 0;
+    
+    // Update display
+    const totalVoxels = VoxelGrid.voxels.filter(v => v.isInsideHead).length;
+    document.getElementById('voxel-count').textContent = totalVoxels;
+    document.getElementById('voxel-shown-count').textContent = `${shownCount} (${(100 * shownCount / totalVoxels).toFixed(1)}%)`;
+    document.getElementById('voxel-avg-channels').textContent = avgChannels;
+    
+    console.log(`Voxel filter: showing ${shownCount}/${totalVoxels} voxels (avg ${avgChannels} channels/voxel)`);
 }
 
 /**
@@ -2325,6 +5166,224 @@ function setupEventHandlers() {
         DOM.resultsModal.classList.remove('active');
     });
     
+    document.getElementById('btn-run-coregistration')?.addEventListener('click', runCoregistrationOnCurrentMontage);
+    document.getElementById('btn-show-coreg-metrics')?.addEventListener('click', showCoregistrationMetrics);
+    document.getElementById('btn-close-coreg')?.addEventListener('click', () => {
+        document.getElementById('coreg-modal')?.classList.remove('active');
+    });
+    
+    // Grid system event handlers
+    document.getElementById('use-grid-system')?.addEventListener('change', (e) => {
+        GridSystem.config.enabled = e.target.checked;
+        console.log(`Grid system ${GridSystem.config.enabled ? 'enabled' : 'disabled'}`);
+        renderPreview();
+        renderSchematic();
+    });
+    
+    document.getElementById('show-grid-points')?.addEventListener('change', () => {
+        renderPreview();
+        renderSchematic();
+        renderAssignCanvas();
+    });
+    
+    document.getElementById('grid-density')?.addEventListener('change', () => {
+        renderPreview();
+        renderSchematic();
+        renderAssignCanvas();
+    });
+    
+    document.getElementById('show-geodesic-grid')?.addEventListener('change', () => {
+        renderPreview();
+        renderSchematic();
+        renderAssignCanvas();
+        // Update 3D views
+        if (AppState.three.preview) update3DOptodes('preview', false);
+        if (AppState.three.schematic) update3DOptodes('schematic', true);
+        if (AppState.three.assign) update3DOptodes('assign', true);
+    });
+    
+    document.getElementById('geodesic-spacing')?.addEventListener('change', () => {
+        // Regenerate geodesic grid with new spacing
+        const spacing = parseFloat(document.getElementById('geodesic-spacing')?.value || 15);
+        GridSystem.geodesicGrid = generateGeodesicGrid(spacing);
+        document.getElementById('geodesic-count').textContent = `~${GridSystem.geodesicGrid.length}`;
+        console.log(`Geodesic grid regenerated: ${GridSystem.geodesicGrid.length} positions at ${spacing}mm surface spacing`);
+        
+        // Update all views
+        renderPreview();
+        renderSchematic();
+        renderAssignCanvas();
+        if (AppState.three.preview) update3DOptodes('preview', false);
+        if (AppState.three.schematic) update3DOptodes('schematic', true);
+        if (AppState.three.assign) update3DOptodes('assign', true);
+    });
+    
+    // Voxel system event handlers
+    document.getElementById('voxel-resolution')?.addEventListener('change', () => {
+        const resolution = parseFloat(document.getElementById('voxel-resolution')?.value || 5);
+        VoxelGrid.resolution = resolution;
+        VoxelGrid.initialize();
+        document.getElementById('voxel-count').textContent = `${VoxelGrid.voxels.filter(v => v.isInsideHead).length}`;
+        console.log(`Voxel grid regenerated at ${resolution}mm resolution`);
+    });
+    
+    document.getElementById('show-photon-paths')?.addEventListener('change', () => {
+        // Update 3D visualization
+        if (AppState.three.preview) update3DOptodes('preview', false);
+        if (AppState.three.schematic) update3DOptodes('schematic', true);
+        if (AppState.three.assign) update3DOptodes('assign', true);
+    });
+    
+    document.getElementById('path-opacity')?.addEventListener('input', (e) => {
+        document.getElementById('path-opacity-value').textContent = e.target.value;
+        // Update 3D visualization
+        if (AppState.three.preview) update3DOptodes('preview', false);
+        if (AppState.three.schematic) update3DOptodes('schematic', true);
+        if (AppState.three.assign) update3DOptodes('assign', true);
+    });
+    
+    // Voxel selection mode
+    document.getElementById('voxel-selection-mode')?.addEventListener('change', (e) => {
+        const mode = e.target.value;
+        const customSettings = document.getElementById('voxel-custom-settings');
+        const weightedSettings = document.getElementById('voxel-weighted-settings');
+        
+        // Show/hide custom settings
+        if (mode === 'custom') {
+            customSettings.style.display = 'block';
+            weightedSettings.style.display = 'block';
+        } else {
+            customSettings.style.display = 'none';
+            weightedSettings.style.display = 'none';
+        }
+        
+        // Update statistics and 3D visualization
+        updateVoxelStats();
+        if (AppState.three.preview) update3DOptodes('preview', false);
+        if (AppState.three.schematic) update3DOptodes('schematic', true);
+        if (AppState.three.assign) update3DOptodes('assign', true);
+    });
+    
+    document.getElementById('voxel-min-channels')?.addEventListener('input', () => {
+        // Update statistics and 3D visualization
+        updateVoxelStats();
+        if (AppState.three.preview) update3DOptodes('preview', false);
+        if (AppState.three.schematic) update3DOptodes('schematic', true);
+        if (AppState.three.assign) update3DOptodes('assign', true);
+    });
+    
+    document.getElementById('voxel-min-weight')?.addEventListener('input', (e) => {
+        document.getElementById('voxel-min-weight-value').textContent = e.target.value;
+        // Update statistics and 3D visualization
+        updateVoxelStats();
+        if (AppState.three.preview) update3DOptodes('preview', false);
+        if (AppState.three.schematic) update3DOptodes('schematic', true);
+        if (AppState.three.assign) update3DOptodes('assign', true);
+    });
+    
+    document.getElementById('voxel-threshold')?.addEventListener('input', (e) => {
+        document.getElementById('voxel-threshold-value').textContent = e.target.value;
+        // Update statistics and 3D visualization
+        updateVoxelStats();
+        if (AppState.three.preview) update3DOptodes('preview', false);
+        if (AppState.three.schematic) update3DOptodes('schematic', true);
+        if (AppState.three.assign) update3DOptodes('assign', true);
+    });
+    
+    document.getElementById('voxel-brightness')?.addEventListener('input', (e) => {
+        document.getElementById('voxel-brightness-value').textContent = e.target.value;
+        // Update 3D visualization
+        if (AppState.three.preview) update3DOptodes('preview', false);
+        if (AppState.three.schematic) update3DOptodes('schematic', true);
+        if (AppState.three.assign) update3DOptodes('assign', true);
+    });
+    
+    document.getElementById('show-voxels')?.addEventListener('change', () => {
+        // Update 3D visualization
+        if (AppState.three.preview) update3DOptodes('preview', false);
+        if (AppState.three.schematic) update3DOptodes('schematic', true);
+        if (AppState.three.assign) update3DOptodes('assign', true);
+    });
+    
+    document.getElementById('btn-build-sensitivity')?.addEventListener('click', () => {
+        const matrix = buildSensitivityMatrix();
+        
+        if (!matrix) {
+            alert('Cannot build sensitivity matrix. Please create a montage with sources, detectors, and channels first.');
+            return;
+        }
+        
+        // Update UI
+        document.getElementById('matrix-size').textContent = `${matrix.nNonZero.toLocaleString()} (${(matrix.sparsity * 100).toFixed(1)}% sparse)`;
+        
+        // Update voxel statistics with filter criteria
+        updateVoxelStats();
+        
+        // Auto-enable voxel display
+        document.getElementById('show-voxels').checked = true;
+        
+        // Update 3D visualization
+        if (AppState.three.preview) update3DOptodes('preview', false);
+        if (AppState.three.schematic) update3DOptodes('schematic', true);
+        if (AppState.three.assign) update3DOptodes('assign', true);
+        
+        alert(`Sensitivity matrix built!\n\nChannels: ${matrix.nChannels}\nVoxels: ${matrix.nVoxels}\nNon-zero entries: ${matrix.nNonZero.toLocaleString()}\nSparsity: ${(matrix.sparsity * 100).toFixed(2)}%\n\nVoxel visualization enabled.\nReady for source reconstruction.`);
+    });
+    
+    // Note: show-brain-parcellation checkbox removed from UI, but kept for backward compatibility
+    // Brain parcellation is now automatically enabled in ROI mode
+    document.getElementById('show-brain-parcellation')?.addEventListener('change', () => {
+        // Update 3D visualization (except ROI mode which always has parcellation)
+        if (AppState.three.preview) update3DOptodes('preview', false);
+        if (AppState.three.schematic) update3DOptodes('schematic', true);
+        if (AppState.three.assign) update3DOptodes('assign', true);
+    });
+    
+    document.getElementById('btn-export-matrix')?.addEventListener('click', () => {
+        if (!VoxelGrid.sensitivityMatrix) {
+            alert('Please build sensitivity matrix first (click "Build Sensitivity Matrix")');
+            return;
+        }
+        
+        const data = {
+            matrix: VoxelGrid.sensitivityMatrix,
+            voxelGrid: {
+                bounds: VoxelGrid.bounds,
+                resolution: VoxelGrid.resolution,
+                dimensions: VoxelGrid.dimensions,
+                voxels: VoxelGrid.voxels.filter(v => v.isInsideHead).map(v => ({
+                    id: v.id,
+                    x: v.x,
+                    y: v.y,
+                    z: v.z,
+                    totalSensitivity: v.totalSensitivity
+                }))
+            },
+            channels: AppState.channels.map(ch => ({
+                id: ch.id,
+                sourceId: ch.sourceId,
+                detectorId: ch.detectorId,
+                distance: ch.distance,
+                penetrationDepth: ch.photonPath?.penetrationDepth
+            })),
+            metadata: {
+                exportDate: new Date().toISOString(),
+                software: 'NOMAD fNIRS Montage Designer',
+                version: '2.0'
+            }
+        };
+        
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `sensitivity_matrix_${Date.now()}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        
+        console.log('Sensitivity matrix exported');
+    });
+    
     document.getElementById('btn-save-schematic')?.addEventListener('click', saveSchematic);
     document.getElementById('btn-create-mtg')?.addEventListener('click', exportMtgFile);
     document.getElementById('btn-create-snirf')?.addEventListener('click', exportSnirfJson);
@@ -2529,6 +5588,179 @@ function runCrosstalkCheck() {
             ${conflictHtml}
         `;
     }
+}
+
+/**
+ * Run coregistration on currently loaded montage
+ */
+function runCoregistrationOnCurrentMontage() {
+    if (AppState.sources.length === 0 && AppState.detectors.length === 0) {
+        alert('Please load a montage first!');
+        return;
+    }
+    
+    // Check if grid system is enabled - warn user
+    if (GridSystem.config.enabled) {
+        const proceed = confirm(
+            'Grid system is currently enabled. Coregistration works best with grid disabled.\n\n' +
+            'Disable grid system and run coregistration?'
+        );
+        if (!proceed) return;
+        
+        // Disable grid system
+        GridSystem.config.enabled = false;
+        const gridCheckbox = document.getElementById('use-grid-system');
+        if (gridCheckbox) gridCheckbox.checked = false;
+    }
+    
+    // Gather all optodes
+    const allOptodes = [
+        ...AppState.sources.map(s => ({x: s.x, y: s.y, z: s.z, id: s.id, type: 'source', label: s.label})),
+        ...AppState.detectors.map(d => ({x: d.x, y: d.y, z: d.z, id: d.id, type: 'detector', label: d.label}))
+    ];
+    
+    // Get coregistration options from UI
+    const coregOptions = {
+        useRigidAlignment: document.getElementById('use-fiducial-alignment')?.checked !== false,
+        useRegression: document.getElementById('use-regression')?.checked !== false,
+        useSurfaceFitting: document.getElementById('use-surface-fitting')?.checked !== false
+    };
+    
+    // Check if we have any fiducials for alignment
+    let measuredFiducials = null;
+    if (coregOptions.useRigidAlignment && AppState.loadedFile && AppState.loadedFile.fiducials) {
+        measuredFiducials = AppState.loadedFile.fiducials;
+    }
+    
+    console.log('Running coregistration on current montage...');
+    console.log(`Options: Fiducial=${coregOptions.useRigidAlignment}, Regression=${coregOptions.useRegression}, Surface=${coregOptions.useSurfaceFitting}`);
+    
+    // Run coregistration
+    const coregistered = coregisterOptodes(allOptodes, measuredFiducials, coregOptions);
+    
+    // Update positions in AppState
+    for (let i = 0; i < AppState.sources.length; i++) {
+        AppState.sources[i].x = coregistered[i].x;
+        AppState.sources[i].y = coregistered[i].y;
+        AppState.sources[i].z = coregistered[i].z;
+    }
+    
+    for (let i = 0; i < AppState.detectors.length; i++) {
+        const idx = AppState.sources.length + i;
+        AppState.detectors[i].x = coregistered[idx].x;
+        AppState.detectors[i].y = coregistered[idx].y;
+        AppState.detectors[i].z = coregistered[idx].z;
+    }
+    
+    // Rebuild channels with new positions
+    buildChannels();
+    
+    // Update visualizations
+    updateStats();
+    renderPreview();
+    renderSchematic();
+    if (AppState.viewMode === '3d') {
+        if (AppState.three.preview) update3DOptodes('preview', false);
+        if (AppState.three.schematic) update3DOptodes('schematic', true);
+    }
+    
+    // Show success message with metrics
+    const metrics = CoregistrationState.metrics;
+    let message = '✅ Coregistration complete!\n\n';
+    
+    if (metrics.fiducialError !== null) {
+        message += `Fiducial alignment: ${metrics.fiducialError.toFixed(2)}mm RMS\n`;
+    }
+    if (metrics.surfaceError !== null) {
+        message += `Surface fitting: ${metrics.surfaceError.toFixed(2)}mm RMS\n`;
+    }
+    if (metrics.maxError !== null) {
+        message += `Maximum error: ${metrics.maxError.toFixed(2)}mm\n`;
+    }
+    if (metrics.coverage !== null) {
+        message += `Coverage: ${metrics.coverage.toFixed(1)}% within 5mm\n`;
+    }
+    
+    message += '\nClick "View Quality Metrics" for detailed analysis.';
+    
+    alert(message);
+    
+    console.log('Coregistration complete. Updated positions for all optodes.');
+}
+
+/**
+ * Display coregistration quality metrics
+ */
+function showCoregistrationMetrics() {
+    const modal = document.getElementById('coreg-modal');
+    if (!modal) return;
+    
+    const metrics = CoregistrationState.metrics;
+    
+    // Update metric values
+    const fiducialEl = document.querySelector('#metric-fiducial .value');
+    const surfaceEl = document.querySelector('#metric-surface .value');
+    const maxEl = document.querySelector('#metric-max .value');
+    const coverageEl = document.querySelector('#metric-coverage .value');
+    const interpretEl = document.getElementById('interpretation-text');
+    
+    if (metrics.fiducialError !== null) {
+        fiducialEl.textContent = metrics.fiducialError.toFixed(2);
+        fiducialEl.style.color = metrics.fiducialError < 3 ? '#2ecc71' : 
+                                 metrics.fiducialError < 5 ? '#f39c12' : '#e74c3c';
+    } else {
+        fiducialEl.textContent = 'N/A';
+        fiducialEl.style.color = '#95a5a6';
+    }
+    
+    if (metrics.surfaceError !== null) {
+        surfaceEl.textContent = metrics.surfaceError.toFixed(2);
+        surfaceEl.style.color = metrics.surfaceError < 2 ? '#2ecc71' : 
+                                metrics.surfaceError < 5 ? '#f39c12' : '#e74c3c';
+    } else {
+        surfaceEl.textContent = 'N/A';
+        surfaceEl.style.color = '#95a5a6';
+    }
+    
+    if (metrics.maxError !== null) {
+        maxEl.textContent = metrics.maxError.toFixed(2);
+        maxEl.style.color = metrics.maxError < 5 ? '#2ecc71' : 
+                            metrics.maxError < 10 ? '#f39c12' : '#e74c3c';
+    } else {
+        maxEl.textContent = 'N/A';
+        maxEl.style.color = '#95a5a6';
+    }
+    
+    if (metrics.coverage !== null) {
+        coverageEl.textContent = metrics.coverage.toFixed(1);
+        coverageEl.style.color = metrics.coverage > 95 ? '#2ecc71' : 
+                                 metrics.coverage > 85 ? '#f39c12' : '#e74c3c';
+    } else {
+        coverageEl.textContent = 'N/A';
+        coverageEl.style.color = '#95a5a6';
+    }
+    
+    // Generate interpretation
+    let interpretation = '';
+    if (metrics.surfaceError === null) {
+        interpretation = 'No coregistration has been performed yet. Load a montage to see alignment quality.';
+    } else if (metrics.surfaceError < 2 && metrics.coverage > 95) {
+        interpretation = '✅ Excellent coregistration! Optodes are well-aligned to the anatomical model.';
+    } else if (metrics.surfaceError < 5 && metrics.coverage > 85) {
+        interpretation = '✓ Good coregistration. Minor positioning errors are within acceptable range for fNIRS.';
+    } else if (metrics.surfaceError < 10) {
+        interpretation = '⚠️ Moderate coregistration quality. Consider checking fiducial marker positions.';
+    } else {
+        interpretation = '❌ Poor coregistration. Fiducial markers may be incorrectly digitized. Manual adjustment recommended.';
+    }
+    
+    if (metrics.fiducialError !== null && metrics.fiducialError > 5) {
+        interpretation += ' High fiducial error suggests measurement issues with nasion/inion/LPA/RPA markers.';
+    }
+    
+    interpretEl.textContent = interpretation;
+    
+    modal.classList.add('active');
 }
 
 function showChannelStats() {
@@ -2932,25 +6164,20 @@ function setupROIMode() {
             document.getElementById(`${mode}-mode`)?.classList.add('active');
             
             if (mode === 'roi') {
-                renderROICanvas();
+                // Initialize 3D brain viewer if not already initialized
+                const roi3dContainer = document.getElementById('roi-3d-container');
+                if (roi3dContainer && !AppState.three.roi) {
+                    init3DScene(roi3dContainer, 'roi');
+                    // Always enable brain parcellation for ROI mode
+                    // Force update the view to show brain regions
+                    setTimeout(() => {
+                        if (AppState.three.roi) {
+                            update3DOptodes('roi', false);
+                        }
+                    }, 100);
+                }
             }
         });
-    });
-    
-    // ROI canvas interactions
-    const roiCanvas = document.getElementById('roi-canvas');
-    if (roiCanvas) {
-        roiCanvas.addEventListener('click', handleROIClick);
-        roiCanvas.addEventListener('mousemove', handleROIHover);
-        roiCanvas.addEventListener('mouseleave', () => {
-            ROIState.hoveredRegion = null;
-            renderROICanvas();
-        });
-    }
-    
-    // Show electrodes checkbox
-    document.getElementById('show-electrodes')?.addEventListener('change', () => {
-        renderROICanvas();
     });
     
     // Load MNE-NIRS example button
@@ -3102,13 +6329,13 @@ function renderROICanvas() {
 /**
  * Convert MNE head coordinates to canvas position
  * MNE uses RAS coordinate system:
- *   X: right ear (+) to left ear (-)
- *   Y: back of head (-) to nose (+)
- *   Z: bottom (-) to top (+)
+ *   X: left ear (-) to right ear (+)
+ *   Y: back of head (-) to nose (+) [anterior-posterior]
+ *   Z: bottom/neck (-) to top of head (+) [inferior-superior]
  * 
- * For topographic view (looking down from above):
- *   Canvas X = MNE X (right/left preserved)
- *   Canvas Y = -MNE Y (flip so nose is at top)
+ * For standard top-down view (looking down at head from above):
+ *   Canvas X = MNE X (left/right preserved)
+ *   Canvas Y = -MNE Y (flip so nose/anterior is at top of canvas)
  *   
  * @param {Object} region - Region with x, y, z coordinates in mm
  * @param {number} cx - Canvas center X
@@ -3127,12 +6354,16 @@ function regionToCanvas(region, cx, cy, headRadius) {
     }
     
     // New MNE format - convert 3D coordinates to 2D topographic view
+    // MNE/MNI coordinates: X=left(-)/right(+), Y=posterior(-)/anterior(+), Z=inferior(-)/superior(+)
+    // For standard top-down view (looking down at head from above, nose at top):
+    //   Canvas X: maps to MNI X (left/right)
+    //   Canvas Y: maps to MNI Y (anterior/posterior, with anterior/nose at top)
     // Scale: typical head radius is ~100mm, we map to headRadius pixels
     const scale = headRadius / MNE_SCALE;
     
     return {
-        x: cx + region.x * scale,        // Right is positive
-        y: cy - region.y * scale         // Nose (anterior/+Y) at top
+        x: cx + region.x * scale,        // Left(-) on left, Right(+) on right
+        y: cy - region.y * scale         // Anterior(+Y/nose) at top (negative canvas Y), Posterior(-Y) at bottom
     };
 }
 
@@ -3152,12 +6383,13 @@ function mneToThreeJS(x, y, z) {
 
 /**
  * Get electrode position on canvas
+ * Uses same coordinate transformation as regionToCanvas for consistency
  */
 function electrodeToCanvas(electrode, cx, cy, headRadius) {
     const scale = headRadius / MNE_SCALE;
     return {
-        x: cx + electrode.x * scale,
-        y: cy - electrode.y * scale
+        x: cx + electrode.x * scale,        // Left(-) on left, Right(+) on right
+        y: cy - electrode.y * scale         // Anterior(+Y/nose) at top, Posterior(-Y) at bottom
     };
 }
 
@@ -3227,12 +6459,20 @@ function updateROISelectedDisplay() {
     const display = document.getElementById('roi-selected');
     if (!display) return;
     
-    if (ROIState.selectedRegions.size === 0) {
-        display.innerHTML = '<span class="placeholder">Click regions to select</span>';
+    // Use brain surface regions if available, otherwise fallback to old ROI system
+    const selectedRegions = BRAIN_SURFACE.selectedRegions.size > 0 
+        ? BRAIN_SURFACE.selectedRegions 
+        : ROIState.selectedRegions;
+    
+    if (selectedRegions.size === 0) {
+        display.innerHTML = '<span class="placeholder">Click regions on 3D brain to select</span>';
     } else {
-        const tags = Array.from(ROIState.selectedRegions).map(name => {
+        const tags = Array.from(selectedRegions).map(name => {
+            // Try to get region info from BRAIN_REGIONS, or just show the name
             const region = BRAIN_REGIONS[name];
-            return `<span class="region-tag" style="background: ${region.color}">${region.label}</span>`;
+            const color = region ? region.color : '#3498db';
+            const label = region ? region.label : name;
+            return `<span class="region-tag" style="background: ${color}; padding: 4px 8px; margin: 2px; border-radius: 3px; display: inline-block; color: white; font-size: 11px;">${label}</span>`;
         }).join('');
         display.innerHTML = tags;
     }
@@ -3240,100 +6480,45 @@ function updateROISelectedDisplay() {
 
 function clearROISelection() {
     ROIState.selectedRegions.clear();
+    BRAIN_SURFACE.selectedRegions.clear();
     updateROISelectedDisplay();
-    renderROICanvas();
+    
+    // Update 3D brain visualization in all views
+    if (AppState.three.roi) {
+        colorBrainByParcellation();
+        update3DOptodes('roi', false);
+    }
+    if (AppState.three.preview) update3DOptodes('preview', false);
+    if (AppState.three.schematic) update3DOptodes('schematic', true);
+    if (AppState.three.assign) update3DOptodes('assign', true);
+    
+    console.log('Cleared ROI selection');
 }
 
 function generateROIMontage() {
-    if (ROIState.selectedRegions.size === 0) {
-        alert('Please select at least one brain region!');
-        return;
-    }
-    
-    const density = document.getElementById('roi-density')?.value || 'medium';
-    const priority = document.getElementById('roi-priority')?.value || 'coverage';
-    
     // Get hardware limits from configuration settings
     const maxSources = parseInt(DOM.nSources?.value) || 32;
     const maxDetectors = parseInt(DOM.nDetectors?.value) || 15;
-    const nRegions = ROIState.selectedRegions.size;
     
-    // Density affects the SPACING between optodes, not the total count
-    // Total count is determined by hardware limits distributed across regions
-    const densityConfig = {
-        'low': { spacing: 40, sourceDetectorRatio: 2 },      // Wide spacing
-        'medium': { spacing: 30, sourceDetectorRatio: 2 },   // Standard HD-DOT spacing
-        'high': { spacing: 22, sourceDetectorRatio: 2 },     // Dense spacing
-        'hd': { spacing: 13, sourceDetectorRatio: 2.5 }      // UHD-DOT spacing (~6.5mm effective)
-    };
-    
-    const config = densityConfig[density];
-    
-    // Distribute hardware-limited optodes across selected regions
-    // Each region gets a fair share, rounded up to ensure we use available hardware
-    const sourcesPerRegion = Math.ceil(maxSources / nRegions);
-    const detectorsPerRegion = Math.ceil(maxDetectors / nRegions);
-    
-    // Use density setting to control spacing
-    const spacing = config.spacing;
-    
-    // Generate optode positions for selected regions
-    const sources = [];
-    const detectors = [];
-    let sourceId = 0;
-    let detectorId = 0;
-    
-    for (const regionName of ROIState.selectedRegions) {
-        const region = BRAIN_REGIONS[regionName];
-        
-        // Check if we've hit hardware limits
-        const remainingSources = maxSources - sources.length;
-        const remainingDetectors = maxDetectors - detectors.length;
-        
-        if (remainingSources <= 0 && remainingDetectors <= 0) {
-            console.log(`Skipping region ${regionName} - hardware limits reached`);
-            continue;
-        }
-        
-        // Limit this region's optodes to what's remaining
-        const regionSources = Math.min(sourcesPerRegion, remainingSources);
-        const regionDetectors = Math.min(detectorsPerRegion, remainingDetectors);
-        
-        // Generate positions within this region
-        const regionOptodes = generateOptimizedRegionOptodes(
-            region, 
-            regionSources, 
-            regionDetectors,
-            spacing,
-            priority
-        );
-        
-        // Add sources
-        for (const pos of regionOptodes.sources) {
-            if (sources.length >= maxSources) break;
-            sources.push({
-                id: sourceId++,
-                x: pos.x,
-                y: pos.y,
-                z: pos.z,
-                label: `S${sourceId}`,
-                region: regionName
-            });
-        }
-        
-        // Add detectors
-        for (const pos of regionOptodes.detectors) {
-            if (detectors.length >= maxDetectors) break;
-            detectors.push({
-                id: detectorId++,
-                x: pos.x,
-                y: pos.y,
-                z: pos.z,
-                label: `D${detectorId}`,
-                region: regionName
-            });
-        }
+    // Use brain surface selection if available, otherwise fall back to old ROI system
+    let regionNames;
+    if (BRAIN_SURFACE.selectedRegions && BRAIN_SURFACE.selectedRegions.size > 0) {
+        regionNames = Array.from(BRAIN_SURFACE.selectedRegions);
+        // Sync to old ROI state for compatibility
+        ROIState.selectedRegions = new Set(regionNames);
+    } else {
+        regionNames = Array.from(ROIState.selectedRegions);
     }
+    
+    // If no regions selected, distribute over whole head
+    if (regionNames.length === 0) {
+        console.log('No ROI selected, distributing evenly over whole head');
+    }
+    
+    const result = selectGridPositionsForRegions(regionNames, maxSources, maxDetectors);
+    
+    const sources = result.sources;
+    const detectors = result.detectors;
     
     // Update app state
     AppState.sources = sources;
@@ -3342,17 +6527,48 @@ function generateROIMontage() {
     // Build channels and conflict graph
     buildChannels();
     
-    // Update UI - show how much of available hardware is used
+    // Update UI
+    const nRegions = regionNames.length;
+    const regionText = nRegions === 0 ? 'whole head' : 
+                      `${nRegions} region${nRegions > 1 ? 's' : ''}`;
     const utilizationNote = sources.length < maxSources || detectors.length < maxDetectors
         ? ` (using ${sources.length}/${maxSources}S, ${detectors.length}/${maxDetectors}D available)`
         : ' (full hardware utilization)';
     
-    DOM.fileInfo.innerHTML = `<span class="text-success">✓ Generated ${sources.length}S / ${detectors.length}D from ${nRegions} region${nRegions > 1 ? 's' : ''}${utilizationNote}</span>`;
+    DOM.fileInfo.innerHTML = `<span class="text-success">✓ Generated ${sources.length}S / ${detectors.length}D from ${regionText}${utilizationNote}</span>`;
     
     updateStats();
     renderPreview();
+    renderSchematic();
+    renderAssignCanvas();
     
-    console.log(`Generated ROI montage: ${sources.length} sources, ${detectors.length} detectors (hardware: ${maxSources}S/${maxDetectors}D)`);
+    console.log(`Generated ROI montage: ${sources.length} sources, ${detectors.length} detectors from ${regionText}`);
+}
+
+/**
+ * Update the display of selected ROIs in the UI
+ * Note: selected-rois-display element removed from main settings panel
+ * This function now only logs to console for backward compatibility
+ */
+function updateSelectedROIsDisplay() {
+    const display = document.getElementById('selected-rois-display');
+    const selected = Array.from(BRAIN_SURFACE.selectedRegions);
+    
+    // Update display if it exists (for backward compatibility)
+    if (display) {
+        if (selected.length === 0) {
+            display.textContent = 'No regions selected';
+            display.style.color = '#999';
+        } else {
+            display.textContent = `Selected: ${selected.join(', ')}`;
+            display.style.color = '#27ae60';
+        }
+    }
+    
+    // Log for debugging
+    if (selected.length > 0) {
+        console.log('Selected ROIs:', selected.join(', '));
+    }
 }
 
 function generateOptimizedRegionOptodes(region, nSources, nDetectors, spacing, priority) {
@@ -3380,6 +6596,10 @@ function generateOptimizedRegionOptodes(region, nSources, nDetectors, spacing, p
     let placedSources = 0;
     let placedDetectors = 0;
     
+    // Calculate target source/detector ratio
+    const totalOptodes = nSources + nDetectors;
+    const sourceRatio = nSources / totalOptodes;
+    
     for (let i = 0; i < gridSize && (placedSources < nSources || placedDetectors < nDetectors); i++) {
         for (let j = 0; j < gridSize && (placedSources < nSources || placedDetectors < nDetectors); j++) {
             // Offset from center
@@ -3396,46 +6616,65 @@ function generateOptimizedRegionOptodes(region, nSources, nDetectors, spacing, p
             // Convert to cartesian
             const pos = sphericalToCartesian(theta, phi, r);
             
-            // Alternate between sources and detectors for good interleaving
-            const isSource = (i + j) % 2 === 0;
+            // Use checkerboard pattern to intersperse sources and detectors
+            const isSourceCell = (i + j) % 2 === 0;
             
-            if (isSource && placedSources < nSources) {
+            // Balance the ratio
+            const currentSourceRatio = placedSources / Math.max(1, placedSources + placedDetectors);
+            const needMoreSources = currentSourceRatio < sourceRatio - 0.1;
+            const needMoreDetectors = currentSourceRatio > sourceRatio + 0.1;
+            
+            // Decide whether to place source or detector
+            let placeSource;
+            if (placedSources >= nSources) {
+                placeSource = false;
+            } else if (placedDetectors >= nDetectors) {
+                placeSource = true;
+            } else if (needMoreSources) {
+                placeSource = true;
+            } else if (needMoreDetectors) {
+                placeSource = false;
+            } else {
+                placeSource = isSourceCell;
+            }
+            
+            if (placeSource) {
                 sources.push(pos);
                 placedSources++;
-            } else if (!isSource && placedDetectors < nDetectors) {
-                detectors.push(pos);
-                placedDetectors++;
-            } else if (placedSources < nSources) {
-                sources.push(pos);
-                placedSources++;
-            } else if (placedDetectors < nDetectors) {
+            } else {
                 detectors.push(pos);
                 placedDetectors++;
             }
         }
     }
     
-    // If we need more optodes, add them in a ring around the center
-    while (placedSources < nSources) {
-        const angle = (placedSources / nSources) * 2 * Math.PI;
-        const ringRadius = regionRadius * 0.6;
+    // Add remaining optodes in rings, alternating between sources and detectors
+    let ringIndex = 0;
+    while (placedSources < nSources || placedDetectors < nDetectors) {
+        const angle = ringIndex * (2 * Math.PI / 8);
+        const ringRadius = regionRadius * (0.4 + 0.2 * (ringIndex % 3));
         
         const theta = centerTheta + ringRadius * Math.sin(angle);
         const phi = Math.max(0.1, Math.min(0.85, centerPhi + ringRadius * Math.cos(angle)));
         
-        sources.push(sphericalToCartesian(theta, phi, r));
-        placedSources++;
-    }
-    
-    while (placedDetectors < nDetectors) {
-        const angle = (placedDetectors / nDetectors) * 2 * Math.PI + Math.PI / nDetectors;
-        const ringRadius = regionRadius * 0.4;
+        const pos = sphericalToCartesian(theta, phi, r);
         
-        const theta = centerTheta + ringRadius * Math.sin(angle);
-        const phi = Math.max(0.1, Math.min(0.85, centerPhi + ringRadius * Math.cos(angle)));
+        // Alternate based on current ratio
+        const currentSourceRatio = placedSources / Math.max(1, placedSources + placedDetectors);
+        const shouldPlaceSource = currentSourceRatio < sourceRatio;
         
-        detectors.push(sphericalToCartesian(theta, phi, r));
-        placedDetectors++;
+        if (shouldPlaceSource && placedSources < nSources) {
+            sources.push(pos);
+            placedSources++;
+        } else if (placedDetectors < nDetectors) {
+            detectors.push(pos);
+            placedDetectors++;
+        } else if (placedSources < nSources) {
+            sources.push(pos);
+            placedSources++;
+        }
+        
+        ringIndex++;
     }
     
     return { sources, detectors };
@@ -3449,19 +6688,19 @@ function generateOptimizedRegionOptodesMNE(region, nSources, nDetectors, spacing
     const detectors = [];
     
     // Region center in MNE coordinates (mm)
-    const cx = region.x;
-    const cy = region.y;
-    const cz = region.z;
+    // Project region center onto standard head surface
+    const centerLen = Math.sqrt(region.x*region.x + region.y*region.y + region.z*region.z);
+    const headR = HEAD.radius;
+    const cx = (region.x / centerLen) * headR;
+    const cy = (region.y / centerLen) * headR;
+    const cz = (region.z / centerLen) * headR;
     const regionRadius = region.radius || 30; // mm
-    
-    // Calculate head surface radius at this location
-    const headR = Math.sqrt(cx*cx + cy*cy + cz*cz);
     
     // Generate a grid of positions in the tangent plane at the region center
     const gridSize = Math.ceil(Math.sqrt(nSources + nDetectors));
     
     // Calculate tangent plane basis vectors
-    // Normal vector pointing outward from head center
+    // Normal vector pointing outward from head center (already normalized)
     const nx = cx / headR;
     const ny = cy / headR;
     const nz = cz / headR;
@@ -3491,7 +6730,11 @@ function generateOptimizedRegionOptodesMNE(region, nSources, nDetectors, spacing
     let placedSources = 0;
     let placedDetectors = 0;
     
-    // Generate grid in tangent plane
+    // Calculate target source/detector ratio
+    const totalOptodes = nSources + nDetectors;
+    const sourceRatio = nSources / totalOptodes;
+    
+    // Generate grid in tangent plane with interspersed sources and detectors
     for (let i = 0; i < gridSize && (placedSources < nSources || placedDetectors < nDetectors); i++) {
         for (let j = 0; j < gridSize && (placedSources < nSources || placedDetectors < nDetectors); j++) {
             // Offset from center in tangent plane (mm)
@@ -3517,68 +6760,85 @@ function generateOptimizedRegionOptodesMNE(region, nSources, nDetectors, spacing
                 z: pz * scale
             };
             
-            // Alternate between sources and detectors
-            const isSource = (i + j) % 2 === 0;
+            // Use checkerboard pattern to intersperse sources and detectors
+            const isSourceCell = (i + j) % 2 === 0;
             
-            if (isSource && placedSources < nSources) {
+            // Also balance the ratio
+            const currentSourceRatio = placedSources / Math.max(1, placedSources + placedDetectors);
+            const needMoreSources = currentSourceRatio < sourceRatio - 0.1;
+            const needMoreDetectors = currentSourceRatio > sourceRatio + 0.1;
+            
+            // Decide whether to place source or detector
+            let placeSource;
+            if (placedSources >= nSources) {
+                placeSource = false;
+            } else if (placedDetectors >= nDetectors) {
+                placeSource = true;
+            } else if (needMoreSources) {
+                placeSource = true;
+            } else if (needMoreDetectors) {
+                placeSource = false;
+            } else {
+                placeSource = isSourceCell;
+            }
+            
+            if (placeSource) {
                 sources.push(pos);
                 placedSources++;
-            } else if (!isSource && placedDetectors < nDetectors) {
-                detectors.push(pos);
-                placedDetectors++;
-            } else if (placedSources < nSources) {
-                sources.push(pos);
-                placedSources++;
-            } else if (placedDetectors < nDetectors) {
+            } else {
                 detectors.push(pos);
                 placedDetectors++;
             }
         }
     }
     
-    // Add remaining optodes in rings around center
-    while (placedSources < nSources) {
-        const angle = (placedSources / nSources) * 2 * Math.PI;
-        const ringRadius = regionRadius * 0.5;
-        
-        const offsetT = ringRadius * Math.cos(angle);
-        const offsetU = ringRadius * Math.sin(angle);
-        
-        const px = cx + offsetT * tx + offsetU * ux;
-        const py = cy + offsetT * ty + offsetU * uy;
-        const pz = cz + offsetT * tz + offsetU * uz;
-        
-        const pLen = Math.sqrt(px*px + py*py + pz*pz);
-        const scale = headR / pLen;
-        
-        sources.push({
-            x: px * scale,
-            y: py * scale,
-            z: pz * scale
-        });
-        placedSources++;
-    }
+    // Add remaining optodes in concentric rings, alternating between sources and detectors
+    let ringIndex = 0;
+    const totalRemaining = (nSources - placedSources) + (nDetectors - placedDetectors);
     
-    while (placedDetectors < nDetectors) {
-        const angle = (placedDetectors / nDetectors) * 2 * Math.PI + Math.PI / (nDetectors || 1);
-        const ringRadius = regionRadius * 0.3;
+    while (placedSources < nSources || placedDetectors < nDetectors) {
+        // Alternate rings between sources and detectors for good interleaving
+        const ringRadius = regionRadius * (0.4 + 0.3 * (ringIndex % 3) / 2);
+        const optodesInRing = Math.min(8, totalRemaining - ringIndex);
         
-        const offsetT = ringRadius * Math.cos(angle);
-        const offsetU = ringRadius * Math.sin(angle);
-        
-        const px = cx + offsetT * tx + offsetU * ux;
-        const py = cy + offsetT * ty + offsetU * uy;
-        const pz = cz + offsetT * tz + offsetU * uz;
-        
-        const pLen = Math.sqrt(px*px + py*py + pz*pz);
-        const scale = headR / pLen;
-        
-        detectors.push({
-            x: px * scale,
-            y: py * scale,
-            z: pz * scale
-        });
-        placedDetectors++;
+        for (let k = 0; k < optodesInRing && (placedSources < nSources || placedDetectors < nDetectors); k++) {
+            const angle = (k / optodesInRing) * 2 * Math.PI + (ringIndex * Math.PI / optodesInRing);
+            
+            const offsetT = ringRadius * Math.cos(angle);
+            const offsetU = ringRadius * Math.sin(angle);
+            
+            const px = cx + offsetT * tx + offsetU * ux;
+            const py = cy + offsetT * ty + offsetU * uy;
+            const pz = cz + offsetT * tz + offsetU * uz;
+            
+            const pLen = Math.sqrt(px*px + py*py + pz*pz);
+            const scale = headR / pLen;
+            
+            const pos = {
+                x: px * scale,
+                y: py * scale,
+                z: pz * scale
+            };
+            
+            // Alternate based on position in ring
+            const currentSourceRatio = placedSources / Math.max(1, placedSources + placedDetectors);
+            const shouldPlaceSource = (k % 2 === 0) ? 
+                (currentSourceRatio < sourceRatio) : 
+                (currentSourceRatio <= sourceRatio);
+            
+            if (shouldPlaceSource && placedSources < nSources) {
+                sources.push(pos);
+                placedSources++;
+            } else if (placedDetectors < nDetectors) {
+                detectors.push(pos);
+                placedDetectors++;
+            } else if (placedSources < nSources) {
+                sources.push(pos);
+                placedSources++;
+            }
+            
+            ringIndex++;
+        }
     }
     
     return { sources, detectors };
@@ -3593,6 +6853,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Load MNE anatomy data first (before rendering)
     await loadMNEAnatomy();
     
+    // Initialize grid system from electrode positions
+    initializeGridSystem();
+    
     setupNavigation();
     setupFileImport();
     setupEventHandlers();
@@ -3604,4 +6867,5 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.log('NOMAD Web Edition v2.0 initialized');
     console.log('Features: Topographic head view, 3D brain visualization, ROI-based design, MNE-NIRS compatibility');
     console.log(`Brain regions: ${Object.keys(BRAIN_REGIONS).length}, Electrodes: ${Object.keys(ELECTRODES_1020).length}`);
+    console.log(`Grid system: ${GridSystem.positions.length} standardized positions available`);
 });

@@ -1218,6 +1218,65 @@ a:hover {
     margin-bottom: var(--space-lg);
 }
 
+/* Coregistration metrics styling */
+.metric-card {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    padding: var(--space-md);
+    margin-bottom: var(--space-md);
+    border-left: 4px solid var(--accent-teal);
+}
+
+.metric-card h4 {
+    margin: 0 0 var(--space-sm) 0;
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+
+.metric-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin: var(--space-sm) 0;
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.metric-value .value {
+    display: inline-block;
+    min-width: 60px;
+}
+
+.metric-desc {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin: var(--space-xs) 0 0 0;
+    line-height: 1.4;
+}
+
+.metric-interpretation {
+    background: var(--sand-lightest);
+    border-radius: var(--radius-md);
+    padding: var(--space-md);
+    margin-top: var(--space-lg);
+    border: 2px solid var(--border-color);
+    line-height: 1.6;
+}
+
+.metric-interpretation strong {
+    color: var(--text-primary);
+}
+
+/* Button row for multiple buttons */
+.button-row {
+    display: flex;
+    gap: var(--space-sm);
+    margin-top: var(--space-sm);
+}
+
+.button-row .btn-small {
+    flex: 1;
+}
+
 .progress-bar {
     height: 8px;
     background: var(--sand-light);
