@@ -36,29 +36,7 @@ env/
 .ipynb_checkpoints/
 *.ipynb
 
-# Data and results
-*.csv
-*.pkl
-*.h5
-*.hdf5
 
-# Figures
-*.png
-*.jpg
-*.pdf
-*.eps
-!paper/figures/.gitkeep
-
-# LaTeX
-*.aux
-*.log
-*.out
-*.toc
-*.bbl
-*.blg
-*.synctex.gz
-*.fdb_latexmk
-*.fls
 
 # OS
 .DS_Store
