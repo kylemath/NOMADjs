@@ -1,0 +1,74 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\citation{scholkmann2014review,boas2014twenty}
+\citation{ferrari2012brief}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
+\citation{eggebrecht2014mapping,fishell2019mapping}
+\@writefile{toc}{\contentsline {subsection}{\numberline {1.1}The Multiplexing Problem}{2}{subsection.1.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {1.2}Contributions}{2}{subsection.1.2}\protected@file@percent }
+\citation{scholkmann2014review,ferrari2012brief,boas2014twenty}
+\citation{eggebrecht2014mapping,fishell2019mapping}
+\citation{brigadoi2018optodes,fu2015design}
+\citation{jensen2011graph}
+\citation{meyer1973equitable}
+\citation{tuza1997graph}
+\@writefile{toc}{\contentsline {subsection}{\numberline {1.3}Related Work}{3}{subsection.1.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {2}Problem Formulation}{3}{section.2}\protected@file@percent }
+\newlabel{sec:problem}{{2}{3}{Problem Formulation}{section.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}fNIRS System Model}{3}{subsection.2.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Crosstalk Constraint}{3}{subsection.2.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.3}Multiplexing Assignment Problem}{4}{subsection.2.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.4}Conflict Graph Structure}{4}{subsection.2.4}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Conflict graph for a 32-source, 15-detector fNIRS configuration. Nodes represent sources, colored by their assigned time slot. Edges connect sources that cannot be in the same slot due to crosstalk at a shared detector.}}{5}{figure.caption.1}\protected@file@percent }
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{fig:conflict_graph}{{1}{5}{Conflict graph for a 32-source, 15-detector fNIRS configuration. Nodes represent sources, colored by their assigned time slot. Edges connect sources that cannot be in the same slot due to crosstalk at a shared detector}{figure.caption.1}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {3}Complexity Analysis}{5}{section.3}\protected@file@percent }
+\newlabel{sec:complexity}{{3}{5}{Complexity Analysis}{section.3}{}}
+\citation{brelaz1979new}
+\@writefile{toc}{\contentsline {section}{\numberline {4}Algorithms}{6}{section.4}\protected@file@percent }
+\newlabel{sec:algorithms}{{4}{6}{Algorithms}{section.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Random Restart Monte Carlo}{6}{subsection.4.1}\protected@file@percent }
+\@writefile{loa}{\contentsline {algorithm}{\numberline {1}{\ignorespaces Random Restart Monte Carlo for fNIRS Multiplexing}}{6}{algorithm.1}\protected@file@percent }
+\newlabel{alg:monte-carlo}{{1}{6}{Random Restart Monte Carlo for fNIRS Multiplexing}{algorithm.1}{}}
+\@writefile{loa}{\contentsline {algorithm}{\numberline {2}{\ignorespaces Randomized Greedy Construction}}{6}{algorithm.2}\protected@file@percent }
+\newlabel{alg:greedy}{{2}{6}{Randomized Greedy Construction}{algorithm.2}{}}
+\citation{mathewson2013nomad}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}DSATUR Heuristic}{7}{subsection.4.2}\protected@file@percent }
+\@writefile{loa}{\contentsline {algorithm}{\numberline {3}{\ignorespaces DSATUR for fNIRS Multiplexing}}{7}{algorithm.3}\protected@file@percent }
+\newlabel{alg:dsatur}{{3}{7}{DSATUR for fNIRS Multiplexing}{algorithm.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Greedy Baseline}{7}{subsection.4.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {5}Experimental Evaluation}{7}{section.5}\protected@file@percent }
+\newlabel{sec:experiments}{{5}{7}{Experimental Evaluation}{section.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Experimental Setup}{7}{subsection.5.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Results}{8}{subsection.5.2}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Multiplexing Algorithm Performance on fNIRS Configurations}}{8}{table.caption.2}\protected@file@percent }
+\newlabel{tab:results}{{1}{8}{Multiplexing Algorithm Performance on fNIRS Configurations}{table.caption.2}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Time slot utilization for a 32-source configuration. Random Restart achieves perfect balance (4 sources per slot), fully utilizing the available capacity.}}{9}{figure.caption.3}\protected@file@percent }
+\newlabel{fig:color_dist}{{2}{9}{Time slot utilization for a 32-source configuration. Random Restart achieves perfect balance (4 sources per slot), fully utilizing the available capacity}{figure.caption.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Why Does Random Restart Outperform DSATUR?}{9}{subsection.5.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.4}Comparison to Manual Assignment}{10}{subsection.5.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {6}Application: High-Density fNIRS Montage Design}{10}{section.6}\protected@file@percent }
+\newlabel{sec:application}{{6}{10}{Application: High-Density fNIRS Montage Design}{section.6}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {7}Discussion}{10}{section.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.1}Implications for fNIRS System Design}{10}{subsection.7.1}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Multiplexing solution for a 32-source, 15-detector fNIRS configuration. Sources are colored by time slot (8 colors). Detectors shown as red triangles. All 32 sources are assigned with no crosstalk.}}{11}{figure.caption.4}\protected@file@percent }
+\newlabel{fig:optical}{{3}{11}{Multiplexing solution for a 32-source, 15-detector fNIRS configuration. Sources are colored by time slot (8 colors). Detectors shown as red triangles. All 32 sources are assigned with no crosstalk}{figure.caption.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.2}Limitations}{11}{subsection.7.2}\protected@file@percent }
+\bibstyle{plain}
+\bibcite{scholkmann2014review}{1}
+\bibcite{boas2014twenty}{2}
+\bibcite{ferrari2012brief}{3}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.3}Generalizations}{12}{subsection.7.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {8}Conclusion}{12}{section.8}\protected@file@percent }
+\bibcite{eggebrecht2014mapping}{4}
+\bibcite{fishell2019mapping}{5}
+\bibcite{brigadoi2018optodes}{6}
+\bibcite{fu2015design}{7}
+\bibcite{jensen2011graph}{8}
+\bibcite{meyer1973equitable}{9}
+\bibcite{tuza1997graph}{10}
+\bibcite{brelaz1979new}{11}
+\bibcite{mathewson2013nomad}{12}
+\gdef \@abspage@last{13}
