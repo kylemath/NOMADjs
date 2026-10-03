@@ -68,3 +68,5 @@ Thumbs.db
 *.asv
 *.mat
 
+/nomad/
+/mne_data/
