@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voxel Filtering Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .test-case {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .pass { background-color: #d4edda; border-color: #c3e6cb; }
+        .fail { background-color: #f8d7da; border-color: #f5c6cb; }
+        h1 { color: #333; }
+        h2 { color: #555; font-size: 18px; }
+        pre { background: #f5f5f5; padding: 10px; border-radius: 3px; }
+        .summary { font-weight: bold; margin-top: 20px; padding: 10px; }
+    </style>
+</head>
+<body>
+    <h1>🧪 Voxel Filtering Logic Test</h1>
+    <p>Testing the <code>shouldShowVoxel()</code> function with various scenarios</p>
+    
+    <div id="results"></div>
+    <div id="summary" class="summary"></div>
+
+    <script>
+        // Mock voxel filtering function (copy from nomad.js)
+        function shouldShowVoxel(voxel, params) {
+            const { mode, minChannels, minWeightPct, maxSensitivity } = params;
+            
+            if (!voxel.isInsideHead) return false;
+            
+            // Count channels contributing to this voxel
+            const channelCount = Object.keys(voxel.sensitivity || {}).length;
+            
+            // Get normalized weighted sum
+            const normalizedSens = maxSensitivity > 0 ? voxel.totalSensitivity / maxSensitivity : 0;
+            
+            // Apply criteria based on mode
+            switch (mode) {
+                case 'lenient':
+                    // Show any voxel with any light penetration
+                    return channelCount > 0 && voxel.totalSensitivity > 1e-9;
+                
+                case 'moderate':
+                    // Show voxels with either: 2+ channels OR moderate sensitivity (>10% of max)
+                    return (channelCount >= 2) || (normalizedSens > 0.1);
+                
+                case 'strict':
+                    // Show voxels with many channels (3+) AND high sensitivity (>20% of max)
+                    return (channelCount >= 3) && (normalizedSens > 0.2);
+                
+                case 'custom':
+                    // Use user-specified thresholds
+                    const meetsChannelReq = channelCount >= minChannels;
+                    const meetsWeightReq = normalizedSens >= (minWeightPct / 100);
+                    return meetsChannelReq && meetsWeightReq;
+                
+                default:
+                    return false;
+            }
+        }
+
+        // Test cases
+        const tests = [
+            {
+                name: "Lenient mode - Single channel with tiny sensitivity",
+                voxel: {
+                    isInsideHead: true,
+                    sensitivity: { ch1: 0.001 },
+                    totalSensitivity: 0.001
+                },
+                params: { mode: 'lenient', maxSensitivity: 100 },
+                expected: true
+            },
+            {
+                name: "Lenient mode - No channels",
+                voxel: {
+                    isInsideHead: true,
+                    sensitivity: {},
+                    totalSensitivity: 0
+                },
+                params: { mode: 'lenient', maxSensitivity: 100 },
+                expected: false
+            },
+            {
+                name: "Moderate mode - Two channels with low sensitivity",
+                voxel: {
+                    isInsideHead: true,
+                    sensitivity: { ch1: 2, ch2: 3 },
+                    totalSensitivity: 5
+                },
+                params: { mode: 'moderate', maxSensitivity: 100 },
+                expected: true // Passes because channelCount >= 2
+            },
+            {
+                name: "Moderate mode - One channel with 15% sensitivity",
+                voxel: {
+                    isInsideHead: true,
+                    sensitivity: { ch1: 15 },
+                    totalSensitivity: 15
+                },
+                params: { mode: 'moderate', maxSensitivity: 100 },
+                expected: true // Passes because normalizedSens > 0.1
+            },
+            {
+                name: "Moderate mode - One channel with 5% sensitivity",
+                voxel: {
+                    isInsideHead: true,
+                    sensitivity: { ch1: 5 },
+                    totalSensitivity: 5
+                },
+                params: { mode: 'moderate', maxSensitivity: 100 },
+                expected: false // Fails both criteria
+            },
+            {
+                name: "Strict mode - Three channels with 25% sensitivity",
+                voxel: {
+                    isInsideHead: true,
+                    sensitivity: { ch1: 10, ch2: 8, ch3: 7 },
+                    totalSensitivity: 25
+                },
+                params: { mode: 'strict', maxSensitivity: 100 },
+                expected: true // Passes both criteria
+            },
+            {
+                name: "Strict mode - Five channels with 15% sensitivity",
+                voxel: {
+                    isInsideHead: true,
+                    sensitivity: { ch1: 3, ch2: 3, ch3: 3, ch4: 3, ch5: 3 },
+                    totalSensitivity: 15
+                },
+                params: { mode: 'strict', maxSensitivity: 100 },
+                expected: false // Has channels but sensitivity too low
+            },
+            {
+                name: "Strict mode - Two channels with 50% sensitivity",
+                voxel: {
+                    isInsideHead: true,
+                    sensitivity: { ch1: 30, ch2: 20 },
+                    totalSensitivity: 50
+                },
+                params: { mode: 'strict', maxSensitivity: 100 },
+                expected: false // Has sensitivity but not enough channels
+            },
+            {
+                name: "Custom mode - 4 channels, 10% threshold, voxel has 5 channels at 15%",
+                voxel: {
+                    isInsideHead: true,
+                    sensitivity: { ch1: 3, ch2: 3, ch3: 3, ch4: 3, ch5: 3 },
+                    totalSensitivity: 15
+                },
+                params: { mode: 'custom', minChannels: 4, minWeightPct: 10, maxSensitivity: 100 },
+                expected: true // Meets both criteria
+            },
+            {
+                name: "Custom mode - 4 channels, 10% threshold, voxel has 3 channels at 15%",
+                voxel: {
+                    isInsideHead: true,
+                    sensitivity: { ch1: 5, ch2: 5, ch3: 5 },
+                    totalSensitivity: 15
+                },
+                params: { mode: 'custom', minChannels: 4, minWeightPct: 10, maxSensitivity: 100 },
+                expected: false // Fails channel requirement
+            },
+            {
+                name: "Outside head - Should always fail",
+                voxel: {
+                    isInsideHead: false,
+                    sensitivity: { ch1: 50, ch2: 50 },
+                    totalSensitivity: 100
+                },
+                params: { mode: 'lenient', maxSensitivity: 100 },
+                expected: false
+            }
+        ];
+
+        // Run tests
+        let passed = 0;
+        let failed = 0;
+        const resultsDiv = document.getElementById('results');
+
+        tests.forEach((test, index) => {
+            const result = shouldShowVoxel(test.voxel, test.params);
+            const success = result === test.expected;
+            
+            if (success) passed++;
+            else failed++;
+
+            const testDiv = document.createElement('div');
+            testDiv.className = `test-case ${success ? 'pass' : 'fail'}`;
+            testDiv.innerHTML = `
+                <h2>Test ${index + 1}: ${test.name}</h2>
+                <p><strong>Expected:</strong> ${test.expected}</p>
+                <p><strong>Got:</strong> ${result}</p>
+                <p><strong>Status:</strong> ${success ? '✅ PASS' : '❌ FAIL'}</p>
+                <details>
+                    <summary>Details</summary>
+                    <pre>${JSON.stringify({
+                        voxel: test.voxel,
+                        params: test.params
+                    }, null, 2)}</pre>
+                </details>
+            `;
+            resultsDiv.appendChild(testDiv);
+        });
+
+        // Summary
+        const summaryDiv = document.getElementById('summary');
+        summaryDiv.className = `summary ${failed === 0 ? 'pass' : 'fail'}`;
+        summaryDiv.innerHTML = `
+            <h2>Test Summary</h2>
+            <p>Total Tests: ${tests.length}</p>
+            <p>Passed: ${passed} ✅</p>
+            <p>Failed: ${failed} ${failed > 0 ? '❌' : ''}</p>
+            <p><strong>${failed === 0 ? 'All tests passed!' : 'Some tests failed.'}</strong></p>
+        `;
+    </script>
+</body>
+</html>
+

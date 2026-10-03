@@ -3325,140 +3325,77 @@
     }
   },
   "fnirs_regions": {
-    "PFC-L": {
-      "name": "Left Prefrontal Cortex",
-      "x": -29.44,
-      "y": 83.92,
-      "z": -6.99,
-      "anchor": "Fp1",
-      "radius": 35,
+    "Frontal-L": {
+      "name": "Left Frontal",
+      "x": -45.0,
+      "y": 60.0,
+      "z": 10.0,
+      "anchor": "F3",
+      "radius": 45,
       "color": "#e74c3c"
     },
-    "PFC-R": {
-      "name": "Right Prefrontal Cortex",
-      "x": 29.87,
-      "y": 84.9,
-      "z": -7.08,
-      "anchor": "Fp2",
-      "radius": 35,
+    "Frontal-R": {
+      "name": "Right Frontal",
+      "x": 45.0,
+      "y": 60.0,
+      "z": 10.0,
+      "anchor": "F4",
+      "radius": 45,
       "color": "#e74c3c"
     },
-    "mPFC": {
-      "name": "Medial Prefrontal Cortex",
-      "x": 0.11,
-      "y": 88.25,
-      "z": -1.71,
-      "anchor": "Fpz",
-      "radius": 30,
+    "Parietal-L": {
+      "name": "Left Parietal",
+      "x": -55.0,
+      "y": -40.0,
+      "z": 60.0,
+      "anchor": "P3",
+      "radius": 45,
+      "color": "#3498db"
+    },
+    "Parietal-R": {
+      "name": "Right Parietal",
+      "x": 55.0,
+      "y": -40.0,
+      "z": 60.0,
+      "anchor": "P4",
+      "radius": 45,
+      "color": "#3498db"
+    },
+    "Temporal-L": {
+      "name": "Left Temporal",
+      "x": -80.0,
+      "y": -10.0,
+      "z": 0.0,
+      "anchor": "T7",
+      "radius": 45,
+      "color": "#f39c12"
+    },
+    "Temporal-R": {
+      "name": "Right Temporal",
+      "x": 80.0,
+      "y": -10.0,
+      "z": 0.0,
+      "anchor": "T8",
+      "radius": 45,
+      "color": "#f39c12"
+    },
+    "Occipital-L": {
+      "name": "Left Occipital",
+      "x": -30.0,
+      "y": -105.0,
+      "z": 15.0,
+      "anchor": "O1",
+      "radius": 45,
       "color": "#9b59b6"
     },
-    "DLPFC-L": {
-      "name": "Left Dorsolateral Prefrontal",
-      "x": -60.25,
-      "y": 47.79,
-      "z": 15.39,
-      "anchor": "F3/F7",
-      "radius": 30,
-      "color": "#3498db"
-    },
-    "DLPFC-R": {
-      "name": "Right Dorsolateral Prefrontal",
-      "x": 62.44,
-      "y": 49.36,
-      "z": 14.41,
-      "anchor": "F4/F8",
-      "radius": 30,
-      "color": "#3498db"
-    },
-    "M1-L": {
-      "name": "Left Primary Motor Cortex",
-      "x": -65.36,
-      "y": -11.63,
-      "z": 64.36,
-      "anchor": "C3",
-      "radius": 30,
-      "color": "#2ecc71"
-    },
-    "M1-R": {
-      "name": "Right Primary Motor Cortex",
-      "x": 67.12,
-      "y": -10.9,
-      "z": 63.58,
-      "anchor": "C4",
-      "radius": 30,
-      "color": "#2ecc71"
-    },
-    "SMA": {
-      "name": "Supplementary Motor Area",
-      "x": 0.4,
-      "y": -9.17,
-      "z": 100.24,
-      "anchor": "Cz",
-      "radius": 25,
-      "color": "#27ae60"
-    },
-    "STG-L": {
-      "name": "Left Superior Temporal (Wernicke)",
-      "x": -84.16,
-      "y": -16.02,
-      "z": -9.35,
-      "anchor": "T3/T7",
-      "radius": 30,
-      "color": "#fd79a8"
-    },
-    "STG-R": {
-      "name": "Right Superior Temporal",
-      "x": 85.08,
-      "y": -15.02,
-      "z": -9.49,
-      "anchor": "T4/T8",
-      "radius": 30,
-      "color": "#fd79a8"
-    },
-    "IPL-L": {
-      "name": "Left Inferior Parietal",
-      "x": -53.01,
-      "y": -78.79,
-      "z": 55.94,
-      "anchor": "P3",
-      "radius": 30,
-      "color": "#f39c12"
-    },
-    "IPL-R": {
-      "name": "Right Inferior Parietal",
-      "x": 55.67,
-      "y": -78.56,
-      "z": 56.56,
-      "anchor": "P4",
-      "radius": 30,
-      "color": "#f39c12"
-    },
-    "V1-L": {
-      "name": "Left Visual Cortex",
-      "x": -29.41,
-      "y": -112.45,
-      "z": 8.84,
-      "anchor": "O1",
-      "radius": 30,
-      "color": "#6c5ce7"
-    },
-    "V1-R": {
-      "name": "Right Visual Cortex",
-      "x": 29.84,
-      "y": -112.16,
-      "z": 8.8,
+    "Occipital-R": {
+      "name": "Right Occipital",
+      "x": 30.0,
+      "y": -105.0,
+      "z": 15.0,
       "anchor": "O2",
-      "radius": 30,
-      "color": "#6c5ce7"
-    },
-    "V1-M": {
-      "name": "Medial Visual Cortex",
-      "x": 0.11,
-      "y": -114.89,
-      "z": 14.66,
-      "anchor": "Oz",
-      "radius": 30,
-      "color": "#00cec9"
+      "radius": 45,
+      "color": "#9b59b6"
     }
   }
 }
