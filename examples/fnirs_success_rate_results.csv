@@ -1,0 +1,4 @@
+problem_name,algorithm_name,n_nodes,n_trials,n_successes,success_rate,avg_time_all,avg_time_success,median_time_success,min_time_success,avg_quality,std_quality,best_quality,worst_quality
+fNIRS-32,RandomRestartMonteCarlo,32,30,0,0.0,0.2005921204884847,,,,23.0,0.0,23,23
+fNIRS-32,DSATURColoring,32,30,0,0.0,0.01988985538482666,,,,8.0,0.0,8,8
+fNIRS-32,GreedyRandomColoring,32,30,0,0.0,0.003337860107421875,,,,28.0,0.0,28,28
